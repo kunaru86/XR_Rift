@@ -15,6 +15,7 @@
             pointer-events: none;
             text-shadow: 1px 1px 2px black;
         }
+        #stats { color: #00ffff; font-weight: bold; margin-top: 5px; }
     </style>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
     <script type="importmap">
@@ -27,7 +28,10 @@
     </script>
 </head>
 <body>
-    <div id="info">Echo Weaver: Phase 3<br/>Defend the Heart Stone. Spells: Line (Beam), Triangle (Repulse), Cross/X (Barrage).</div>
+    <div id="info">
+        Echo Weaver: Phase 3<br/>Defend the Heart Stone. Spells: Line (Beam), Triangle (Repulse), Cross/X (Barrage).
+        <div id="stats">Power Level: 1 | Locks: 1 | Kills: 0</div>
+    </div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -41,7 +45,7 @@
         let enemies = []; // Hostiles
         const hands = [null, null]; // Left, Right
         
-        // --- Settings ---
+        // --- Settings & Progression ---
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
         const PINCH_THRESH = 0.03;
@@ -49,6 +53,11 @@
         const ORB_SPAWN_RATE = 2.0;   // Seconds between ammo spawns
         let enemySpawnTimer = 0;
         let orbSpawnTimer = 0;
+
+        let enemiesKilled = 0;
+        let maxLocks = 1;
+        let lockedEnemies = [];
+        let lockReticles = [];
 
         const smoothedJoints = new Map();
 
@@ -238,10 +247,31 @@
             trailLine = new THREE.Line(trailGeo, trailMat);
             scene.add(trailLine);
 
+            // --- Lock-on Reticles Pool ---
+            for (let i = 0; i < 4; i++) {
+                const rGeo = new THREE.RingGeometry(0.18, 0.22, 16);
+                const rMat = new THREE.MeshBasicMaterial({color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.7});
+                const reticle = new THREE.Mesh(rGeo, rMat);
+                reticle.visible = false;
+                scene.add(reticle);
+                lockReticles.push(reticle);
+            }
+
             setupHand(0); // Left
             setupHand(1); // Right
 
             window.addEventListener('resize', onWindowResize);
+        }
+
+        function handleEnemyKill() {
+            enemiesKilled++;
+            
+            // Progression logic
+            if (enemiesKilled >= 30) maxLocks = 4;
+            else if (enemiesKilled >= 15) maxLocks = 3;
+            else if (enemiesKilled >= 5) maxLocks = 2;
+
+            document.getElementById('stats').innerText = `Power Level: ${maxLocks} | Locks: ${maxLocks} | Kills: ${enemiesKilled}`;
         }
 
         function damageHeartStone() {
@@ -262,6 +292,9 @@
             if (heartHealth <= 0) {
                 // System reset
                 heartHealth = 100;
+                enemiesKilled = 0;
+                maxLocks = 1;
+                document.getElementById('stats').innerText = `Power Level: ${maxLocks} | Locks: ${maxLocks} | Kills: ${enemiesKilled}`;
                 healthRing.scale.set(1, 1, 1);
                 healthRing.material.color.setHex(0x00ff00);
                 
@@ -357,35 +390,100 @@
             return dist < PINCH_THRESH; 
         }
 
+        function updateTargeting() {
+            lockedEnemies = [];
+            const isHolding = hands[0]?.userData.isHolding || hands[1]?.userData.isHolding;
+
+            if (isHolding && enemies.length > 0) {
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                const candidates = [];
+
+                enemies.forEach(enemy => {
+                    const dirToEnemy = new THREE.Vector3().subVectors(enemy.position, camera.position).normalize();
+                    const dot = forward.dot(dirToEnemy);
+                    // Roughly a 60 degree cone in front of player
+                    if (dot > 0.5) { 
+                        candidates.push({ enemy, dot });
+                    }
+                });
+
+                // Sort by how centered they are on screen
+                candidates.sort((a, b) => b.dot - a.dot);
+
+                for (let i = 0; i < Math.min(maxLocks, candidates.length); i++) {
+                    lockedEnemies.push(candidates[i].enemy);
+                }
+            }
+
+            // Paint the reticles
+            for (let i = 0; i < lockReticles.length; i++) {
+                if (i < lockedEnemies.length) {
+                    lockReticles[i].visible = true;
+                    lockReticles[i].position.copy(lockedEnemies[i].position);
+                    lockReticles[i].lookAt(camera.position);
+                    lockReticles[i].rotation.z += 0.05; // Spin animation
+                } else {
+                    lockReticles[i].visible = false;
+                }
+            }
+        }
+
         function fireSpell(type, origin) {
             if (type === 'line') {
-                // BEAM WEAPON: Raycast forward from camera direction
-                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-                
-                // Visual Effect - rotated -Math.PI/2 to shoot away from the player
-                const geo = new THREE.CylinderGeometry(0.01, 0.01, 10);
-                geo.translate(0, 5, 0); 
-                geo.rotateX(-Math.PI / 2); 
-                const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8});
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(origin);
-                mesh.quaternion.copy(camera.quaternion); 
-                scene.add(mesh);
-                
-                // Collision Logic against Enemies
-                const raycaster = new THREE.Raycaster(origin, forward);
-                const intersects = raycaster.intersectObjects(enemies);
-                
-                if (intersects.length > 0) {
-                    const hitEnemy = intersects[0].object;
-                    const index = enemies.indexOf(hitEnemy);
-                    if(index > -1) {
-                        scene.remove(hitEnemy);
-                        enemies.splice(index, 1);
-                    }
-                }
+                if (lockedEnemies.length > 0) {
+                    // SMART MUNITIONS: Fire auto-homing beams at all locked targets
+                    lockedEnemies.forEach(targetEnemy => {
+                        const start = origin.clone();
+                        const end = targetEnemy.position.clone();
+                        const distance = start.distanceTo(end);
+                        const mid = start.clone().lerp(end, 0.5);
 
-                setTimeout(() => scene.remove(mesh), 200);
+                        const geo = new THREE.CylinderGeometry(0.015, 0.015, distance);
+                        geo.rotateX(Math.PI / 2); // Align cylinder to Z axis for lookAt
+                        const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.9});
+                        const mesh = new THREE.Mesh(geo, mat);
+                        
+                        mesh.position.copy(mid);
+                        mesh.lookAt(end); // Point directly at target
+                        scene.add(mesh);
+
+                        // Destroy target
+                        const index = enemies.indexOf(targetEnemy);
+                        if(index > -1) {
+                            scene.remove(targetEnemy);
+                            enemies.splice(index, 1);
+                            handleEnemyKill();
+                        }
+
+                        setTimeout(() => scene.remove(mesh), 200);
+                    });
+                } else {
+                    // DUMB FIRE FALLBACK: Raycast forward from camera direction
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+                    
+                    const geo = new THREE.CylinderGeometry(0.01, 0.01, 10);
+                    geo.translate(0, 5, 0); 
+                    geo.rotateX(-Math.PI / 2); 
+                    const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8});
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.copy(origin);
+                    mesh.quaternion.copy(camera.quaternion); 
+                    scene.add(mesh);
+                    
+                    const raycaster = new THREE.Raycaster(origin, forward);
+                    const intersects = raycaster.intersectObjects(enemies);
+                    
+                    if (intersects.length > 0) {
+                        const hitEnemy = intersects[0].object;
+                        const index = enemies.indexOf(hitEnemy);
+                        if(index > -1) {
+                            scene.remove(hitEnemy);
+                            enemies.splice(index, 1);
+                            handleEnemyKill();
+                        }
+                    }
+                    setTimeout(() => scene.remove(mesh), 200);
+                }
 
             } else if (type === 'triangle') {
                 // KINETIC REPULSE: Massively Buffed to launch enemies away
@@ -447,6 +545,7 @@
                         if(index > -1) {
                             scene.remove(hitEnemy);
                             enemies.splice(index, 1);
+                            handleEnemyKill();
                         }
                     }
                     setTimeout(() => scene.remove(mesh), 300);
@@ -664,6 +763,7 @@
 
             if (renderer.xr.isPresenting) {
                 updateHands(timeDelta);
+                updateTargeting(); // Compute aim-assist logic
             }
 
             updateEntities(timeDelta, timeSeconds);
