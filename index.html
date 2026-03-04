@@ -55,7 +55,7 @@
         }
       });
 
-      // 1. THE SPATIAL TEAR SHADER (Now with smooth organic edges)
+      // 1. THE SPATIAL TEAR SHADER
       AFRAME.registerShader('rift-void', {
         schema: {
           timeMsec: {type: 'time', is: 'uniform'},
@@ -98,7 +98,6 @@
             vec3 finalColor = mix(colorVoid, colorEdge, glowMask * 2.5);
             finalColor += colorEdge * noise(vec2(time * 20.0, a * 10.0)) * glowMask * 0.5;
 
-            // Consultant fix #13: Smooth organic alpha instead of harsh jagged steps
             float alpha = smoothstep(0.95, 0.70, distortedRadius);
             gl_FragColor = vec4(finalColor, alpha);
           }
@@ -140,7 +139,6 @@
           starsGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
           const starsMaterial = new THREE.PointsMaterial({color: 0xffffff, size: 0.2});
           this.stars = new THREE.Points(starsGeometry, starsMaterial);
-          // Consultant fix #15: Prevent needless CPU culling math
           this.stars.frustumCulled = false; 
           scene.add(this.stars);
 
@@ -163,7 +161,6 @@
             const [w, d, h, color, x, y, z] = data;
             const group = new THREE.Group();
             
-            // Consultant fix #2: Set absolute position on the group so bobbing math works relative to origin
             group.position.set(x, y, z);
             
             const geometry = new THREE.BoxGeometry(w, h, d);
@@ -171,7 +168,6 @@
               color: color, emissive: new THREE.Color(color).multiplyScalar(0.2), roughness: 0.4, metalness: 0.1
             });
             const cube = new THREE.Mesh(geometry, material);
-            // Center cube vertically in its own group
             cube.position.set(0, h/2, 0);
 
             const edges = new THREE.EdgesGeometry(geometry);
@@ -186,22 +182,19 @@
               const targetGeo = new THREE.OctahedronGeometry(0.4); 
               const targetMat = new THREE.MeshStandardMaterial({ color: 0xff0044, emissive: 0xaa0022, wireframe: true });
               const target = new THREE.Mesh(targetGeo, targetMat);
-              // Float relative to the group
               target.position.set(0, h + 1.2, 0); 
               group.add(target);
               
-              // Register to system, eliminating globals
               this.system.registerTarget(target);
               group.userData.targets = [target];
             }
 
-            // Depth shadow underneath to fix VR spatial awareness (Consultant fix #11)
             if (z < -1) {
               const shadowGeo = new THREE.PlaneGeometry(w, d);
               const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false });
               const shadow = new THREE.Mesh(shadowGeo, shadowMat);
               shadow.rotation.x = -Math.PI / 2;
-              shadow.position.set(x, -10, z); // Project way down into the fog
+              shadow.position.set(x, -10, z); 
               scene.add(shadow);
             }
 
@@ -249,7 +242,7 @@
         }
       });
 
-      // 3. PROJECTILE BEHAVIOR (Fully Optimized Memory Pool)
+      // 3. PROJECTILE BEHAVIOR
       AFRAME.registerComponent('projectile-behavior', {
         schema: {
           direction: {type: 'vec3'},
@@ -259,7 +252,6 @@
           this.system = this.el.sceneEl.systems['game-manager'];
           this.system.registerProjectile(this.el);
           
-          // Consultant fix #1: Vector caching to prevent GC stutter
           this.myPos = new THREE.Vector3();
           this.targetPos = new THREE.Vector3();
         },
@@ -292,7 +284,6 @@
             t.getWorldPosition(this.targetPos);
             
             if (this.targetPos.distanceTo(this.myPos) < 0.8) {
-              // Destroy target, spawn explosion, update score
               this.system.spawnExplosion(this.targetPos);
               this.system.addScore();
               
@@ -330,7 +321,6 @@
           this.el.object3D.rotation.x += 0.05;
           this.el.object3D.rotation.y += 0.05;
 
-          // Hit player logic (Consultant fix #6)
           if (this.myPos.distanceTo(this.camPos) < 0.6) {
             this.system.takeDamage();
             this.system.spawnExplosion(this.myPos);
@@ -338,7 +328,6 @@
             return;
           }
 
-          // Check against optimized projectile array (Consultant fix #14)
           const projectiles = this.system.projectiles;
           for (let i = 0; i < projectiles.length; i++) {
             const p = projectiles[i];
@@ -365,7 +354,6 @@
           this.camera = document.querySelector('a-camera');
           this.lastSpawnTime = 0;
           
-          // Wait for DOM to load hand entities safely (Consultant fix #3)
           this.el.addEventListener('loaded', () => {
             const leftHand = document.querySelector('#leftHand');
             const rightHand = document.querySelector('#rightHand');
@@ -425,30 +413,32 @@
         }
       });
 
-      // 6. THE SKELETAL HAND CANNON 
+      // 6. THE SKELETAL HAND CANNON (Updated for 2-finger aim and exact finger-vector alignment)
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.cooldown = false;
           this.camera = document.querySelector('a-camera');
 
+          // Physical gun barrel mesh
           this.gunMesh = document.createElement('a-entity');
           this.gunMesh.setAttribute('geometry', 'primitive: cylinder; radius: 0.01; height: 0.15');
           this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
           this.gunMesh.setAttribute('rotation', '90 0 0');
           this.el.appendChild(this.gunMesh);
 
-          // Consultant fix #10: Muzzle Flash
           this.muzzleFlash = document.createElement('a-entity');
           this.muzzleFlash.setAttribute('geometry', 'primitive: sphere; radius: 0.05');
           this.muzzleFlash.setAttribute('material', 'color: #ffffff; shader: flat');
-          this.muzzleFlash.setAttribute('position', '0 0.1 0'); // Top of the barrel
+          this.muzzleFlash.setAttribute('position', '0 0.1 0');
           this.muzzleFlash.setAttribute('visible', 'false');
           this.gunMesh.appendChild(this.muzzleFlash);
 
+          // Laser pointer 
           this.laser = document.createElement('a-entity');
           this.laser.setAttribute('geometry', 'primitive: cylinder; radius: 0.003; height: 20');
           this.laser.setAttribute('material', 'color: #ff0044; shader: flat; transparent: true; opacity: 0.5');
           this.laser.setAttribute('rotation', '90 0 0'); 
+          // Offset exactly half the height along local Z to keep the pivot point exactly at the finger tip
           this.laser.setAttribute('position', '0 0 -10'); 
           
           this.laserPivot = document.createElement('a-entity');
@@ -483,25 +473,40 @@
           const indexBasePos = new THREE.Vector3();
           const indexTipPos = new THREE.Vector3();
           const middleTipPos = new THREE.Vector3();
+          const ringTipPos = new THREE.Vector3();
+          const pinkyTipPos = new THREE.Vector3();
 
+          // Extract ALL relevant bones for complex pose detection
           bones[0].getWorldPosition(wristPos);
           bones[4].getWorldPosition(thumbTipPos);
           bones[5].getWorldPosition(indexBasePos);
           bones[9].getWorldPosition(indexTipPos);
           bones[14].getWorldPosition(middleTipPos);
+          bones[19].getWorldPosition(ringTipPos);
+          bones[24].getWorldPosition(pinkyTipPos);
 
-          const aimDirection = new THREE.Vector3().subVectors(indexTipPos, wristPos).normalize();
+          // AIM MATH: We calculate the vector from your index KNUCKLE to your index TIP. 
+          // This removes wrist-angle offset issues entirely.
+          const aimDirection = new THREE.Vector3().subVectors(indexTipPos, indexBasePos).normalize();
 
+          // Snap the gun barrel visually to your index finger without artificial Y offsets
           this.gunMesh.object3D.position.copy(indexBasePos);
-          this.gunMesh.object3D.position.y += 0.02; 
           this.gunMesh.object3D.lookAt(indexTipPos);
 
+          // Measure lengths to determine curl status
           const indexLength = indexTipPos.distanceTo(wristPos);
           const midLength = middleTipPos.distanceTo(wristPos);
-          const isGunPose = (midLength < indexLength * 0.75);
+          const ringLength = ringTipPos.distanceTo(wristPos);
+          const pinkyLength = pinkyTipPos.distanceTo(wristPos);
+
+          // POSE DETECT: Index & Middle must be extended. Ring & Pinky must be curled.
+          const isGunPose = (midLength > indexLength * 0.8) && 
+                            (ringLength < indexLength * 0.75) && 
+                            (pinkyLength < indexLength * 0.75);
 
           if (isGunPose) {
             this.laserPivot.setAttribute('visible', true);
+            // Snap laser exactly to the tip of your physical finger
             this.laserPivot.object3D.position.copy(indexTipPos);
             
             const targetPoint = new THREE.Vector3().copy(indexTipPos).add(aimDirection);
@@ -522,9 +527,12 @@
 
           if (this.cooldown) return;
 
+          // HAMMER MATH: Check if thumb is dropped
           const hammerDistance = thumbTipPos.distanceTo(indexBasePos);
           
-          if (isGunPose && hammerDistance < 0.045) { 
+          // Loosened the tolerance from 0.045 to 0.055. 
+          // Standalone cameras frequently lose the thumb when pressed tightly.
+          if (isGunPose && hammerDistance < 0.055) { 
             this.fireCannon(indexTipPos, aimDirection);
           }
         },
@@ -536,12 +544,12 @@
 
           const projectile = document.createElement('a-entity');
           
-          // Consultant fix #9: Projectile trail (Stretched sphere aligns perfectly to velocity)
           projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.06');
           projectile.setAttribute('material', 'color: #00ffcc; shader: flat');
+          
+          // Projectile spawns exactly at the tip of the index finger
           projectile.setAttribute('position', originPos);
           
-          // Stretch it along the Z axis to create a blaster bolt
           projectile.object3D.scale.set(1, 1, 4);
           const alignmentPoint = new THREE.Vector3().copy(originPos).add(aimVector);
           projectile.object3D.lookAt(alignmentPoint);
@@ -569,7 +577,6 @@
       </a-entity>
 
       <a-entity id="rig" position="0 3.5 0">
-        <!-- Consultant fix #4 & #6: HUD and Damage overlay slaved directly to the user's face -->
         <a-camera position="0 1.6 0">
           <a-text id="score-display" value="SCORE: 0" position="0 -0.2 -1" align="center" width="2" color="#00ffcc" font="monoid"></a-text>
           <a-plane id="damage-overlay" position="0 0 -0.5" width="4" height="4" material="color: #ff0000; transparent: true; opacity: 0; shader: flat" depth-test="false"></a-plane>
