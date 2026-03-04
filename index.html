@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Quantum Resonance: Core Loop</title>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    
+    <script>
+      // 1. THE SPATIAL TEAR MANAGER
+      AFRAME.registerComponent('rift-manager', {
+        init: function () {
+          this.leftPinching = false;
+          this.rightPinching = false;
+          this.rift = document.querySelector('#dimensional-rift');
+          
+          const leftHand = document.querySelector('#leftHand');
+          const rightHand = document.querySelector('#rightHand');
+
+          // Listeners for Left Hand
+          leftHand.addEventListener('pinchstarted', () => this.leftPinching = true);
+          leftHand.addEventListener('pinchended', () => {
+            this.leftPinching = false;
+            this.collapseRift();
+          });
+
+          // Listeners for Right Hand
+          rightHand.addEventListener('pinchstarted', () => this.rightPinching = true);
+          rightHand.addEventListener('pinchended', () => {
+            this.rightPinching = false;
+            this.collapseRift();
+          });
+        },
+        
+        tick: function () {
+          // Only execute the tear math if both hands are locked in a pinch
+          if (this.leftPinching && this.rightPinching) {
+            const leftPos = document.querySelector('#leftHand').object3D.position;
+            const rightPos = document.querySelector('#rightHand').object3D.position;
+            
+            // Calculate the 3D distance between the two hands
+            const dx = leftPos.x - rightPos.x;
+            const dy = leftPos.y - rightPos.y;
+            const dz = leftPos.z - rightPos.z;
+            const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            // Map the physical distance to the scale of the rift
+            // Subtracting a deadzone (e.g., 0.1 meters) so it doesn't open immediately
+            const tearScale = Math.max(0, (distance - 0.1) * 3); 
+            
+            // Position the rift exactly halfway between the two hands
+            const midX = (leftPos.x + rightPos.x) / 2;
+            const midY = (leftPos.y + rightPos.y) / 2;
+            const midZ = (leftPos.z + rightPos.z) / 2;
+            
+            this.rift.setAttribute('position', `${midX} ${midY} ${midZ}`);
+            this.rift.setAttribute('scale', `${tearScale} ${tearScale} 0.1`);
+            this.rift.setAttribute('material', 'opacity: 1');
+          }
+        },
+
+        collapseRift: function() {
+          // When a pinch is released, snap the rift shut
+          this.rift.setAttribute('scale', '0 0 0');
+          this.rift.setAttribute('material', 'opacity: 0');
+          console.log("Rift collapsed. Tracking lost or user released tension.");
+        }
+      });
+
+      // 2. THE KINETIC RECOIL CANNON
+      AFRAME.registerComponent('hand-cannon', {
+        init: function () {
+          this.previousPosition = new THREE.Vector3();
+          this.cooldown = false;
+        },
+        
+        tick: function (time, timeDelta) {
+          if (this.cooldown || timeDelta === 0) return;
+
+          const currentPosition = this.el.object3D.position;
+          
+          // Calculate velocity on the Y axis (detecting a sharp upward jerk)
+          const velocityY = (currentPosition.y - this.previousPosition.y) / timeDelta;
+          
+          // If the upward velocity spikes past our threshold, fire the weapon
+          if (velocityY > 0.005) { 
+            this.fireCannon(currentPosition);
+          }
+          
+          this.previousPosition.copy(currentPosition);
+        },
+
+        fireCannon: function(pos) {
+          console.log("BOOM. Kinetic payload delivered.");
+          this.cooldown = true;
+          
+          // Game Logic: Spawn a projectile here using Three.js or A-Frame entities
+          // ...
+
+          // Reset the cooldown after 500ms so they can't spam the processor
+          setTimeout(() => { this.cooldown = false; }, 500);
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene webxr="optionalFeatures: hand-tracking; requiredFeatures: local-floor;" background="transparent: true" rift-manager>
+      
+      <a-entity id="dimensional-rift" 
+                geometry="primitive: cylinder; radius: 1; height: 0.1" 
+                rotation="90 0 0" 
+                material="color: #00ffcc; shader: flat; side: double; opacity: 0; transparent: true" 
+                scale="0 0 0">
+      </a-entity>
+
+      <a-entity id="rig" position="0 0 0">
+        <a-camera position="0 1.6 0"></a-camera>
+        
+        <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
+        
+        <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon></a-entity>
+      </a-entity>
+
+    </a-scene>
+  </body>
+</html>
