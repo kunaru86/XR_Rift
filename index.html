@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo Weaver - Phase 4</title>
+    <title>Echo Weaver - Phase 5</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: monospace; }
         #info {
@@ -16,6 +16,20 @@
             text-shadow: 1px 1px 2px black;
         }
         #stats { color: #00ffff; font-weight: bold; margin-top: 5px; }
+        #wave-announce {
+            position: absolute;
+            top: 40%;
+            width: 100%;
+            text-align: center;
+            font-size: 48px;
+            font-weight: bold;
+            color: #ffaa00;
+            text-shadow: 0 0 20px #ff0000;
+            z-index: 50;
+            pointer-events: none;
+            transition: opacity 1s ease-in-out;
+            opacity: 1; /* Starts visible for Wave 1 */
+        }
     </style>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
     <script type="importmap">
@@ -29,9 +43,10 @@
 </head>
 <body>
     <div id="info">
-        Echo Weaver: Phase 4 (Soul Gauntlet)<br/>Absorb up to 3 Orbs. Spells consume all loaded Orbs to multiply power.
-        <div id="stats">Active Charge: 0 | Kills: 0</div>
+        Echo Weaver: Phase 5 (The Swarm)<br/>Survive the Waves. Max Charge Line = UNIBEAM.
+        <div id="stats">Wave: 1 | Charge: 0/3 | Kills: 0</div>
     </div>
+    <div id="wave-announce">WAVE 1</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -49,11 +64,18 @@
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
         const PINCH_THRESH = 0.03;
-        const ENEMY_SPAWN_RATE = 3.0; 
-        const ORB_SPAWN_RATE = 1.5;   // Faster ammo spawn for stacking
-        const MAX_HELD_ORBS = 3;      // Gauntlet capacity
-        let enemySpawnTimer = 0;
+        const ORB_SPAWN_RATE = 1.2;   
+        const MAX_HELD_ORBS = 3;      
         let orbSpawnTimer = 0;
+
+        // Wave Logic
+        let currentWave = 1;
+        let enemiesTotalThisWave = 30;
+        let enemiesSpawnedThisWave = 0;
+        let waveState = 'spawning'; // 'spawning', 'intermission'
+        let intermissionTimer = 0;
+        let baseEnemySpawnRate = 2.0;
+        let enemySpawnTimer = 0;
 
         let enemiesKilled = 0;
         let lockedEnemies = [];
@@ -195,6 +217,9 @@
         init();
         renderer.setAnimationLoop(animate);
 
+        // Hide Wave 1 text after 3 seconds
+        setTimeout(() => { document.getElementById('wave-announce').style.opacity = 0; }, 3000);
+
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0a0a12);
@@ -244,7 +269,7 @@
             trailLine = new THREE.Line(trailGeo, trailMat);
             scene.add(trailLine);
 
-            // --- Lock-on Reticles Pool (Max 3 for fully charged gauntlet) ---
+            // --- Lock-on Reticles Pool ---
             for (let i = 0; i < MAX_HELD_ORBS; i++) {
                 const rGeo = new THREE.RingGeometry(0.18, 0.22, 16);
                 const rMat = new THREE.MeshBasicMaterial({color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.7});
@@ -269,11 +294,11 @@
             const chargeL = hands[0]?.userData.heldOrbs.length || 0;
             const chargeR = hands[1]?.userData.heldOrbs.length || 0;
             const maxCharge = Math.max(chargeL, chargeR);
-            document.getElementById('stats').innerText = `Active Charge: ${maxCharge}/${MAX_HELD_ORBS} | Kills: ${enemiesKilled}`;
+            document.getElementById('stats').innerText = `Wave: ${currentWave} | Charge: ${maxCharge}/${MAX_HELD_ORBS} | Kills: ${enemiesKilled}`;
         }
 
-        function damageHeartStone() {
-            heartHealth -= 20;
+        function damageHeartStone(amount) {
+            heartHealth -= amount;
             heartStone.material.emissive.setHex(0xff0000);
             setTimeout(() => { heartStone.material.emissive.setHex(0x008888); }, 200);
 
@@ -285,9 +310,19 @@
             else healthRing.material.color.setHex(0xff0000);
 
             if (heartHealth <= 0) {
-                // System reset
+                // GAME OVER - Reset to Wave 1
                 heartHealth = 100;
                 enemiesKilled = 0;
+                currentWave = 1;
+                enemiesTotalThisWave = 30;
+                enemiesSpawnedThisWave = 0;
+                waveState = 'spawning';
+                
+                const ann = document.getElementById('wave-announce');
+                ann.innerText = "SYSTEM REBOOT - WAVE 1";
+                ann.style.opacity = 1;
+                setTimeout(() => { ann.style.opacity = 0; }, 3000);
+
                 updateStatsUI();
                 healthRing.scale.set(1, 1, 1);
                 healthRing.material.color.setHex(0x00ff00);
@@ -300,8 +335,27 @@
             }
         }
 
+        function damageEnemy(enemy, amount) {
+            enemy.userData.hp -= amount;
+            
+            // Hit Flash
+            const originalEmissive = enemy.material.emissive.getHex();
+            enemy.material.emissive.setHex(0xffffff);
+            setTimeout(() => {
+                if (enemies.includes(enemy)) {
+                    enemy.material.emissive.setHex(originalEmissive);
+                }
+            }, 100);
+
+            if (enemy.userData.hp <= 0) {
+                scene.remove(enemy);
+                const index = enemies.indexOf(enemy);
+                if(index > -1) enemies.splice(index, 1);
+                handleEnemyKill();
+            }
+        }
+
         function createOrb(position) {
-            // Ammo - Soul Blue
             const colorHex = 0x00aaff;
             const geo = new THREE.SphereGeometry(0.06, 16, 16);
             const mat = new THREE.MeshStandardMaterial({
@@ -314,14 +368,37 @@
             orbs.push(orb);
         }
 
-        function createEnemy(position) {
-            const geo = new THREE.IcosahedronGeometry(0.12, 0);
+        function createEnemy(position, type) {
+            let scale, hp, speed, color, emissive;
+
+            if (type === 'brute') {
+                scale = 1.8;
+                hp = 3;
+                speed = 0.2;
+                color = 0x880000;
+                emissive = 0x550000;
+            } else { // 'drone'
+                scale = 1.0;
+                hp = 1;
+                speed = 0.5;
+                color = 0xff0000;
+                emissive = 0xaa0000;
+            }
+
+            const geo = new THREE.IcosahedronGeometry(0.12 * scale, 0);
             const mat = new THREE.MeshStandardMaterial({
-                color: 0xff0000, emissive: 0xaa0000, emissiveIntensity: 0.4, roughness: 0.6, flatShading: true
+                color: color, emissive: emissive, emissiveIntensity: 0.4, roughness: 0.6, flatShading: true
             });
             const enemy = new THREE.Mesh(geo, mat);
             enemy.position.copy(position);
-            enemy.userData = { phase: Math.random() * Math.PI * 2, state: 'homing', velocity: new THREE.Vector3() };
+            enemy.userData = { 
+                type: type,
+                hp: hp,
+                baseSpeed: speed,
+                phase: Math.random() * Math.PI * 2, 
+                state: 'homing', 
+                velocity: new THREE.Vector3() 
+            };
             scene.add(enemy);
             enemies.push(enemy);
         }
@@ -331,15 +408,14 @@
             scene.add(hand);
 
             hand.userData.jointMeshes = {};
-            hand.userData.heldOrbs = []; // Array to stack energy
+            hand.userData.heldOrbs = []; 
             hand.userData.handedness = index === 0 ? 'left' : 'right';
 
-            // Add Diegetic Gauntlet Visual
             const gauntletGeo = new THREE.CylinderGeometry(0.04, 0.045, 0.12, 8);
-            gauntletGeo.rotateX(Math.PI / 2); // Align with forearm
+            gauntletGeo.rotateX(Math.PI / 2); 
             const gauntletMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.3 });
             const gauntlet = new THREE.Mesh(gauntletGeo, gauntletMat);
-            gauntlet.visible = false; // Hidden until tracking connects
+            gauntlet.visible = false; 
             scene.add(gauntlet);
             hand.userData.gauntletMesh = gauntlet;
 
@@ -383,21 +459,24 @@
             const chargeR = hands[1]?.userData.heldOrbs.length || 0;
             const currentCharge = Math.max(chargeL, chargeR);
 
-            if (currentCharge > 0 && enemies.length > 0) {
+            if (currentCharge > 0 && currentCharge < MAX_HELD_ORBS && enemies.length > 0) {
+                // Standard Smart Targeting
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 const candidates = [];
 
                 enemies.forEach(enemy => {
                     const dirToEnemy = new THREE.Vector3().subVectors(enemy.position, camera.position).normalize();
                     const dot = forward.dot(dirToEnemy);
-                    if (dot > 0.5) candidates.push({ enemy, dot }); // ~60 degree cone
+                    if (dot > 0.5) candidates.push({ enemy, dot }); 
                 });
 
                 candidates.sort((a, b) => b.dot - a.dot);
-
                 for (let i = 0; i < Math.min(currentCharge, candidates.length); i++) {
                     lockedEnemies.push(candidates[i].enemy);
                 }
+            } else if (currentCharge === MAX_HELD_ORBS) {
+                // UNIBEAM TARGETING MODE - Paints nothing, you must aim the chest laser.
+                lockedEnemies = [];
             }
 
             for (let i = 0; i < lockReticles.length; i++) {
@@ -414,8 +493,38 @@
 
         function fireSpell(type, origin, powerLevel) {
             if (type === 'line') {
-                if (lockedEnemies.length > 0) {
-                    // SMART MUNITIONS: Fire beams at all locked targets (up to powerLevel)
+                if (powerLevel === MAX_HELD_ORBS) {
+                    // UNIBEAM (Iron Man Overload)
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+                    const BEAM_LENGTH = 30;
+                    
+                    const geo = new THREE.CylinderGeometry(0.3, 0.3, BEAM_LENGTH); // Massive cylinder
+                    geo.translate(0, BEAM_LENGTH/2, 0); 
+                    geo.rotateX(-Math.PI / 2); 
+                    const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.9});
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.copy(origin);
+                    mesh.quaternion.copy(camera.quaternion); 
+                    scene.add(mesh);
+
+                    // Physics math: Line3 to check distance of enemies to the beam's core
+                    const endPoint = origin.clone().add(forward.multiplyScalar(BEAM_LENGTH));
+                    const rayLine = new THREE.Line3(origin, endPoint);
+                    const closestPoint = new THREE.Vector3();
+
+                    // Reverse loop to safely kill multiple enemies instantly
+                    for(let i = enemies.length - 1; i >= 0; i--) {
+                        const enemy = enemies[i];
+                        rayLine.closestPointToPoint(enemy.position, true, closestPoint);
+                        if (closestPoint.distanceTo(enemy.position) <= 0.4) { // Cylinder radius
+                            damageEnemy(enemy, 5); // Massive damage, wipes Brutes instantly
+                        }
+                    }
+
+                    setTimeout(() => scene.remove(mesh), 500); // Lingers longer for effect
+                    
+                } else if (lockedEnemies.length > 0) {
+                    // SMART MUNITIONS
                     lockedEnemies.forEach(targetEnemy => {
                         const start = origin.clone();
                         const end = targetEnemy.position.clone();
@@ -431,12 +540,7 @@
                         mesh.lookAt(end); 
                         scene.add(mesh);
 
-                        const index = enemies.indexOf(targetEnemy);
-                        if(index > -1) {
-                            scene.remove(targetEnemy);
-                            enemies.splice(index, 1);
-                            handleEnemyKill();
-                        }
+                        damageEnemy(targetEnemy, 1);
                         setTimeout(() => scene.remove(mesh), 200);
                     });
                 } else {
@@ -455,19 +559,13 @@
                     const intersects = raycaster.intersectObjects(enemies);
                     
                     if (intersects.length > 0) {
-                        const hitEnemy = intersects[0].object;
-                        const index = enemies.indexOf(hitEnemy);
-                        if(index > -1) {
-                            scene.remove(hitEnemy);
-                            enemies.splice(index, 1);
-                            handleEnemyKill();
-                        }
+                        damageEnemy(intersects[0].object, 1);
                     }
                     setTimeout(() => scene.remove(mesh), 200);
                 }
 
             } else if (type === 'triangle') {
-                // KINETIC REPULSE: Scales intensely with absorbed energy
+                // KINETIC REPULSE
                 const REPULSE_RADIUS = 3.0 + (powerLevel * 1.5); 
                 const PUSH_FORCE = 8.0 * powerLevel; 
                 
@@ -487,11 +585,14 @@
                     if (enemy.position.distanceTo(origin) < REPULSE_RADIUS) {
                         enemy.userData.state = 'repulsed';
                         const pushDir = new THREE.Vector3().subVectors(enemy.position, origin).normalize();
-                        enemy.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE)); 
+                        
+                        // Brutes are heavy. Less knockback.
+                        const massFactor = enemy.userData.type === 'brute' ? 0.4 : 1.0;
+                        enemy.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE * massFactor)); 
                     }
                 });
             } else if (type === 'cross' || type === 'x') {
-                // CROSS BARRAGE: Thicker beams, longer duration based on power
+                // CROSS BARRAGE
                 const divergence = Math.PI / 10; 
                 const angles = [
                     new THREE.Euler(divergence, divergence, 0),
@@ -518,15 +619,9 @@
                     const intersects = raycaster.intersectObjects(enemies);
                     
                     if (intersects.length > 0) {
-                        const hitEnemy = intersects[0].object;
-                        const index = enemies.indexOf(hitEnemy);
-                        if(index > -1) {
-                            scene.remove(hitEnemy);
-                            enemies.splice(index, 1);
-                            handleEnemyKill();
-                        }
+                        damageEnemy(intersects[0].object, 1);
                     }
-                    setTimeout(() => scene.remove(mesh), 200 + (powerLevel * 100)); // Lasts longer
+                    setTimeout(() => scene.remove(mesh), 200 + (powerLevel * 100)); 
                 });
             }
         }
@@ -575,7 +670,6 @@
                 // Update Gauntlet Position
                 if (hand.userData.gauntletMesh) {
                     hand.userData.gauntletMesh.visible = true;
-                    // Slightly offset gauntlet behind the wrist joint
                     const offset = new THREE.Vector3(0, 0, 0.05).applyQuaternion(wristSpace.quaternion);
                     hand.userData.gauntletMesh.position.copy(wristSpace.position).add(offset);
                     hand.userData.gauntletMesh.quaternion.copy(wristSpace.quaternion);
@@ -611,7 +705,7 @@
                         orb.userData.heldBy = null; 
                         orb.userData.state = 'idle';
                         orb.userData.baseY = orb.position.y;
-                        orb.scale.set(1, 1, 1); // Restore size
+                        orb.scale.set(1, 1, 1); 
                     });
                     hand.userData.heldOrbs = [];
                     updateStatsUI();
@@ -628,7 +722,7 @@
                             orb.userData.state = 'held';
                             hand.userData.heldOrbs.push(orb);
                             updateStatsUI();
-                            break; // Absorb one per frame to prevent instant stacking visual glitches
+                            break; 
                         }
                     }
                 }
@@ -668,17 +762,54 @@
         }
 
         function updateEntities(timeDelta, timeSeconds) {
-            enemySpawnTimer -= timeDelta;
-            if (enemySpawnTimer <= 0) {
-                enemySpawnTimer = ENEMY_SPAWN_RATE;
-                const angle = Math.PI + (Math.random() * Math.PI); 
-                const radius = 5; 
-                const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
-                createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius));
+            
+            // --- WAVE SPAWNING LOGIC ---
+            if (waveState === 'spawning') {
+                enemySpawnTimer -= timeDelta;
+                if (enemySpawnTimer <= 0 && enemiesSpawnedThisWave < enemiesTotalThisWave) {
+                    // Spawn rates accelerate as wave progresses
+                    enemySpawnTimer = Math.max(0.5, baseEnemySpawnRate - (currentWave * 0.2)); 
+                    
+                    const angle = Math.PI + (Math.random() * Math.PI); 
+                    const radius = 6 + (Math.random() * 2); 
+                    const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
+                    
+                    // Brute injection chance scales with wave level
+                    let type = 'drone';
+                    if (currentWave >= 2 && Math.random() < 0.15 + (currentWave * 0.05)) {
+                        type = 'brute';
+                    }
+
+                    createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius), type);
+                    enemiesSpawnedThisWave++;
+                }
+
+                // Check Wave Completion
+                if (enemiesSpawnedThisWave >= enemiesTotalThisWave && enemies.length === 0) {
+                    waveState = 'intermission';
+                    intermissionTimer = 4.0;
+                    const ann = document.getElementById('wave-announce');
+                    ann.innerText = "WAVE CLEAR";
+                    ann.style.opacity = 1;
+                }
+            } else if (waveState === 'intermission') {
+                intermissionTimer -= timeDelta;
+                if (intermissionTimer <= 0) {
+                    currentWave++;
+                    enemiesTotalThisWave = 20 + (currentWave * 10); // Escalating threat matrix
+                    enemiesSpawnedThisWave = 0;
+                    waveState = 'spawning';
+                    
+                    const ann = document.getElementById('wave-announce');
+                    ann.innerText = `WAVE ${currentWave}`;
+                    setTimeout(() => { ann.style.opacity = 0; }, 2000);
+                    updateStatsUI();
+                }
             }
 
+            // Spawn Ammo
             orbSpawnTimer -= timeDelta;
-            if (orbSpawnTimer <= 0 && orbs.length < 8) { // Allow more floating ammo
+            if (orbSpawnTimer <= 0 && orbs.length < 8) { 
                 orbSpawnTimer = ORB_SPAWN_RATE;
                 const angle = Math.PI + (Math.random() * Math.PI); 
                 const radius = 0.3 + Math.random() * 0.2; 
@@ -692,20 +823,22 @@
 
             const heartPos = heartStone.position;
 
+            // Process Hostiles
             for (let i = enemies.length - 1; i >= 0; i--) {
                 let enemy = enemies[i];
 
                 if (enemy.userData.state === 'homing') {
                     const moveDir = new THREE.Vector3().subVectors(heartPos, enemy.position).normalize();
-                    const SPEED = 0.5; 
-                    enemy.position.add(moveDir.multiplyScalar(SPEED * timeDelta));
+                    enemy.position.add(moveDir.multiplyScalar(enemy.userData.baseSpeed * timeDelta));
                     enemy.position.y += Math.sin(timeSeconds * 4 + enemy.userData.phase) * 0.003;
                     
                     enemy.rotation.x += 0.02;
                     enemy.rotation.y += 0.03;
 
-                    if (enemy.position.distanceTo(heartPos) < 0.4) {
-                        damageHeartStone();
+                    // Dynamic collision radius based on enemy size
+                    const hitRadius = enemy.userData.type === 'brute' ? 0.6 : 0.4;
+                    if (enemy.position.distanceTo(heartPos) < hitRadius) {
+                        damageHeartStone(enemy.userData.type === 'brute' ? 40 : 20); // Brutes hit harder
                         scene.remove(enemy);
                         enemies.splice(i, 1);
                     }
@@ -718,7 +851,7 @@
                 }
             }
 
-            // Process Orbs
+            // Process Ammo Orbs
             orbs.forEach(orb => {
                 if (orb.userData.state === 'held') {
                     const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
@@ -728,19 +861,17 @@
                         const heldIndex = hand.userData.heldOrbs.indexOf(orb);
                         const totalHeld = hand.userData.heldOrbs.length;
                         
-                        // Calculate orbit position around the wrist
                         const orbitRadius = 0.08;
-                        const angleOffset = (heldIndex / totalHeld) * Math.PI * 2 + (timeSeconds * 4);
+                        const angleOffset = (heldIndex / Math.max(1, totalHeld)) * Math.PI * 2 + (timeSeconds * 4);
                         
                         const targetPos = wristPos.clone();
-                        // Creating a local orbital plane relative to the camera for better visibility
                         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
                         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
                         
                         targetPos.add(right.multiplyScalar(Math.cos(angleOffset) * orbitRadius));
                         targetPos.add(up.multiplyScalar(Math.sin(angleOffset) * orbitRadius));
 
-                        orb.scale.lerp(new THREE.Vector3(0.5, 0.5, 0.5), 0.2); // Shrink when absorbed
+                        orb.scale.lerp(new THREE.Vector3(0.5, 0.5, 0.5), 0.2); 
                         orb.position.lerp(targetPos, 0.3); 
                     }
                 } else {
