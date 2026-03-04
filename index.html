@@ -1,497 +1,1071 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo Weaver - Phase 2</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: monospace; }
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            z-index: 100;
-            pointer-events: none;
-            text-shadow: 1px 1px 2px black;
-        }
-    </style>
-    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Echo Weaver — Game Design Specification</title>
+<style>
+  :root {
+    --bg: #07071a; --panel: #0d0d26; --border: #1a1a45;
+    --primary: #7c4dff; --secondary: #00e5ff; --accent: #ff4081;
+    --gold: #ffd740; --text: #c8d6f0; --muted: #6b7fa3; --success: #69f0ae;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    display: flex; height: 100vh; overflow: hidden;
+  }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: 230px; flex-shrink: 0; border-right: 1px solid var(--border);
+    background: var(--panel); display: flex; flex-direction: column;
+    height: 100vh; overflow-y: auto; position: sticky; top: 0;
+  }
+  #sidebar-header {
+    padding: 1.4rem 1.2rem 1.1rem; border-bottom: 1px solid var(--border);
+  }
+  #sidebar-header .label {
+    font-size: 0.58rem; letter-spacing: 0.18em; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 0.25rem;
+  }
+  #sidebar-header .title {
+    font-size: 1.1rem; font-weight: 800; color: var(--secondary);
+    letter-spacing: 0.06em; margin-bottom: 0.1rem;
+  }
+  #sidebar-header .version { font-size: 0.67rem; color: var(--muted); }
+  .nav-btn {
+    display: flex; align-items: center; gap: 0.55rem;
+    width: 100%; padding: 0.52rem 1.2rem; border: none;
+    background: transparent; cursor: pointer; text-align: left;
+    border-left: 3px solid transparent; color: var(--muted);
+    font-size: 0.81rem; font-weight: 400; transition: all 0.12s;
+  }
+  .nav-btn:hover { background: rgba(124,77,255,0.08); color: var(--text); }
+  .nav-btn.active {
+    background: rgba(124,77,255,0.15); border-left-color: var(--primary);
+    color: var(--secondary); font-weight: 700;
+  }
+  .nav-btn .icon { font-size: 0.9rem; flex-shrink: 0; }
+  #sidebar-footer {
+    margin-top: auto; padding: 1.1rem 1.2rem;
+    border-top: 1px solid var(--border); font-size: 0.67rem;
+    color: var(--muted); line-height: 1.6;
+  }
+
+  /* ── MAIN ── */
+  #main { flex: 1; overflow-y: auto; padding: 2.4rem 2.8rem; }
+  .content-wrap { max-width: 840px; }
+  .section-header {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.3rem;
+  }
+  .section-header .sec-icon { font-size: 1.4rem; }
+  .section-header h1 {
+    font-size: 1.5rem; font-weight: 800; color: var(--secondary);
+    letter-spacing: 0.02em;
+  }
+  .section-divider { border-top: 2px solid var(--border); margin: 0.8rem 0 1.8rem; }
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ── TYPOGRAPHY ── */
+  p { color: var(--text); line-height: 1.75; margin-bottom: 0.85rem; font-size: 0.9rem; }
+  h3 { color: var(--secondary); margin: 1.5rem 0 0.7rem; font-size: 1rem; }
+  code { color: var(--gold); font-family: 'Courier New', monospace; font-size: 0.88em; }
+  em { color: var(--gold); font-style: italic; }
+  strong { color: var(--secondary); }
+
+  /* ── BLOCK ── */
+  .block {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.1rem 1.3rem; margin-bottom: 1.1rem;
+    border-left: 4px solid var(--primary);
+  }
+  .block-title {
+    font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 0.75rem; font-weight: 700;
+  }
+
+  /* ── CODE ── */
+  pre {
+    background: #050510; border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.95rem 1.1rem; font-size: 0.74rem; color: #90d4a0;
+    overflow-x: auto; line-height: 1.65;
+    font-family: 'Courier New', Courier, monospace; margin: 0.7rem 0;
+  }
+
+  /* ── TAG ROW ── */
+  .tag-row {
+    display: flex; gap: 0.5rem; align-items: flex-start;
+    margin-bottom: 0.35rem;
+  }
+  .tag-label { color: var(--muted); min-width: 135px; font-size: 0.8rem; flex-shrink: 0; }
+  .tag-value { font-weight: 600; font-size: 0.85rem; color: var(--text); }
+
+  /* ── GRIDS ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 0.75rem; }
+  @media(max-width:700px) {
+    .grid-2,.grid-3,.grid-4 { grid-template-columns: 1fr; }
+    #sidebar { width: 190px; }
+    #main { padding: 1.4rem 1.2rem; }
+  }
+
+  /* ── BADGE ── */
+  .badge {
+    display: inline-block; border-radius: 4px; padding: 2px 8px;
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em;
+    margin-right: 6px; white-space: nowrap;
+  }
+
+  /* ── DIVIDER ── */
+  .div { border-top: 1px solid var(--border); margin: 1.8rem 0; }
+
+  /* ── KPI cards ── */
+  .kpi {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 7px; padding: 0.85rem; text-align: center;
+  }
+  .kpi-val { font-size: 1.15rem; font-weight: 800; margin-bottom: 0.3rem; }
+  .kpi-lbl { font-size: 0.75rem; color: var(--muted); }
+
+  /* ── COLOR SWATCH ── */
+  .swatch-wrap { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .swatch { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+  .swatch-box { width: 52px; height: 52px; border-radius: 7px; }
+  .swatch-name { font-size: 0.68rem; color: var(--text); text-align: center; max-width: 66px; }
+  .swatch-hex { font-size: 0.64rem; color: var(--muted); font-family: monospace; }
+  .swatch-role { font-size: 0.63rem; color: var(--muted); text-align: center; max-width: 66px; }
+
+  /* ── TIMELINE ── */
+  .tl-bar { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+  .tl-node {
+    background: rgba(124,77,255,0.15); border: 1px solid var(--primary);
+    border-radius: 5px; padding: 0.32rem 0.6rem;
+    color: var(--secondary); font-weight: 700; font-size: 0.72rem;
+  }
+  .tl-arrow { color: var(--muted); font-size: 0.8rem; }
+
+  /* ── SFX GRID ── */
+  .sfx-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 5px; padding: 0.5rem 0.7rem;
+  }
+  .sfx-event { color: var(--gold); font-size: 0.75rem; font-weight: 700; margin-bottom: 0.2rem; }
+  .sfx-desc { color: var(--muted); font-size: 0.78rem; }
+
+  /* ── MUSIC STEMS ── */
+  .stem-row {
+    display: flex; gap: 0.8rem; padding: 0.42rem 0;
+    border-bottom: 1px solid var(--border); font-size: 0.83rem;
+    align-items: flex-start;
+  }
+  .stem-lbl { min-width: 175px; font-weight: 700; flex-shrink: 0; }
+
+  /* ── MILESTONE TASKS ── */
+  .task-item { display: flex; gap: 0.5rem; margin-bottom: 0.3rem; font-size: 0.82rem; align-items: flex-start; }
+  .task-arrow { flex-shrink: 0; margin-top: 2px; }
+
+  /* ── DEGRADATION ROW ── */
+  .deg-row { display: flex; gap: 0.75rem; margin-bottom: 0.42rem; font-size: 0.83rem; align-items: flex-start; }
+  .deg-time { min-width: 95px; font-weight: 700; flex-shrink: 0; }
+
+  /* ── NAV NUMBERS ── */
+  .nav-num { font-size: 0.7rem; opacity: 0.6; margin-right: 2px; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+</style>
 </head>
 <body>
-    <div id="info">Echo Weaver: Phase 2<br/>Catch an Orb, pinch your index and thumb together to draw, release to cast.</div>
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
+<!-- ════════════════════════════════ SIDEBAR ════════════════════════════════ -->
+<nav id="sidebar">
+  <div id="sidebar-header">
+    <div class="label">Game Design Specification</div>
+    <div class="title">ECHO WEAVER</div>
+    <div class="version">v0.1 &nbsp;·&nbsp; Technical GDD</div>
+  </div>
 
-        // --- System Globals ---
-        let camera, scene, renderer;
-        let heartStone;
-        let orbs = [];
-        const hands = [null, null]; // Left, Right
-        
-        // --- Settings ---
-        const EMA_ALPHA = 0.4; 
-        const CATCH_RADIUS = 0.15; 
-        const PINCH_THRESH = 0.03; // Distance between thumb and index to trigger drawing
+  <button class="nav-btn active" data-section="overview">
+    <span class="icon">◈</span><span class="nav-num">①</span> Overview
+  </button>
+  <button class="nav-btn" data-section="architecture">
+    <span class="icon">⬡</span><span class="nav-num">②</span> Architecture
+  </button>
+  <button class="nav-btn" data-section="handtracking">
+    <span class="icon">✋</span><span class="nav-num">③</span> Hand Tracking
+  </button>
+  <button class="nav-btn" data-section="gesture">
+    <span class="icon">✦</span><span class="nav-num">④</span> Gesture System
+  </button>
+  <button class="nav-btn" data-section="spells">
+    <span class="icon">⚡</span><span class="nav-num">⑤</span> Spellcasting
+  </button>
+  <button class="nav-btn" data-section="physics">
+    <span class="icon">◎</span><span class="nav-num">⑥</span> Physics &amp; Collision
+  </button>
+  <button class="nav-btn" data-section="ui">
+    <span class="icon">◉</span><span class="nav-num">⑦</span> Diegetic UI
+  </button>
+  <button class="nav-btn" data-section="audio">
+    <span class="icon">♪</span><span class="nav-num">⑧</span> Audio Design
+  </button>
+  <button class="nav-btn" data-section="art">
+    <span class="icon">✧</span><span class="nav-num">⑨</span> Art Direction
+  </button>
+  <button class="nav-btn" data-section="milestones">
+    <span class="icon">▸</span><span class="nav-num">⑩</span> Milestones
+  </button>
 
-        const smoothedJoints = new Map();
+  <div id="sidebar-footer">
+    Three.js r160 &nbsp;·&nbsp; TypeScript 5<br/>
+    WebXR Hand Input API<br/>
+    $1 Unistroke Recognizer<br/>
+    Target: Quest 2 / Quest 3 / Vision Pro
+  </div>
+</nav>
 
-        // --- Trail Rendering ---
-        const MAX_TRAIL_POINTS = 150;
-        let trailGeo, trailLine;
-        const trailPositions = new Float32Array(MAX_TRAIL_POINTS * 3);
-        let currentTrailCount = 0;
-        let isDrawing = false;
-        let drawPoints3D = [];
-        let activeCastingHand = null;
+<!-- ════════════════════════════════ MAIN ════════════════════════════════════ -->
+<main id="main">
+<div class="content-wrap">
 
-        // --- $1 Recognizer Implementation (Compact) ---
-        class Point { constructor(x, y) { this.x = x; this.y = y; } }
-        class GestureRecognizer {
-            constructor() {
-                this.NumPoints = 64;
-                this.SquareSize = 250.0;
-                this.HalfDiagonal = 0.5 * Math.sqrt(250.0 * 250.0 + 250.0 * 250.0);
-                this.AngleRange = this.deg2Rad(45.0);
-                this.AnglePrecision = this.deg2Rad(2.0);
-                this.Templates = [];
-                this.setupTemplates();
-            }
-            deg2Rad(d) { return (d * Math.PI / 180.0); }
-            Distance(p1, p2) { return Math.sqrt((p2.x - p1.x)*(p2.x - p1.x) + (p2.y - p1.y)*(p2.y - p1.y)); }
-            PathLength(points) { let d = 0; for(let i=1; i<points.length; i++) d += this.Distance(points[i-1], points[i]); return d; }
-            Resample(points, n) {
-                let I = this.PathLength(points) / (n - 1);
-                let D = 0.0;
-                let newpoints = [points[0]];
-                for (let i = 1; i < points.length; i++) {
-                    let d = this.Distance(points[i-1], points[i]);
-                    if ((D + d) >= I) {
-                        let qx = points[i-1].x + ((I - D) / d) * (points[i].x - points[i-1].x);
-                        let qy = points[i-1].y + ((I - D) / d) * (points[i].y - points[i-1].y);
-                        let q = new Point(qx, qy);
-                        newpoints.push(q);
-                        points.splice(i, 0, q);
-                        D = 0.0;
-                    } else D += d;
-                }
-                if (newpoints.length == n - 1) newpoints.push(points[points.length - 1]);
-                return newpoints;
-            }
-            Centroid(points) {
-                let x = 0.0, y = 0.0;
-                for (let i = 0; i < points.length; i++) { x += points[i].x; y += points[i].y; }
-                return new Point(x / points.length, y / points.length);
-            }
-            RotateBy(points, radians) {
-                let c = this.Centroid(points);
-                let cos = Math.cos(radians), sin = Math.sin(radians);
-                let newpoints = [];
-                for (let i = 0; i < points.length; i++) {
-                    let qx = (points[i].x - c.x) * cos - (points[i].y - c.y) * sin + c.x;
-                    let qy = (points[i].x - c.x) * sin + (points[i].y - c.y) * cos + c.y;
-                    newpoints.push(new Point(qx, qy));
-                }
-                return newpoints;
-            }
-            ScaleTo(points, size) {
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                for (let i = 0; i < points.length; i++) {
-                    minX = Math.min(minX, points[i].x); maxX = Math.max(maxX, points[i].x);
-                    minY = Math.min(minY, points[i].y); maxY = Math.max(maxY, points[i].y);
-                }
-                let newpoints = [];
-                for (let i = 0; i < points.length; i++) {
-                    let qx = points[i].x * (size / Math.max(maxX - minX, 1.0)); // Prevent div by 0 for strict lines
-                    let qy = points[i].y * (size / Math.max(maxY - minY, 1.0));
-                    newpoints.push(new Point(qx, qy));
-                }
-                return newpoints;
-            }
-            TranslateTo(points, pt) {
-                let c = this.Centroid(points);
-                let newpoints = [];
-                for (let i = 0; i < points.length; i++) { newpoints.push(new Point(points[i].x + pt.x - c.x, points[i].y + pt.y - c.y)); }
-                return newpoints;
-            }
-            DistanceAtBestAngle(points, T, a, b, threshold) {
-                let x1 = 0.38197 * a + 0.61803 * b;
-                let f1 = this.DistanceAtAngle(points, T, x1);
-                let x2 = 0.61803 * a + 0.38197 * b;
-                let f2 = this.DistanceAtAngle(points, T, x2);
-                while (Math.abs(b - a) > threshold) {
-                    if (f1 < f2) { b = x2; x2 = x1; f2 = f1; x1 = 0.38197 * a + 0.61803 * b; f1 = this.DistanceAtAngle(points, T, x1); } 
-                    else { a = x1; x1 = x2; f1 = f2; x2 = 0.61803 * a + 0.38197 * b; f2 = this.DistanceAtAngle(points, T, x2); }
-                }
-                return Math.min(f1, f2);
-            }
-            DistanceAtAngle(points, T, radians) {
-                let newpoints = this.RotateBy(points, radians);
-                let d = 0;
-                for (let i = 0; i < points.length; i++) d += this.Distance(newpoints[i], T.Points[i]);
-                return d / points.length;
-            }
-            Normalize(points) {
-                points = this.Resample(points, this.NumPoints);
-                let radians = Math.atan2(points[0].y - this.Centroid(points).y, points[0].x - this.Centroid(points).x);
-                points = this.RotateBy(points, -radians);
-                points = this.ScaleTo(points, this.SquareSize);
-                points = this.TranslateTo(points, new Point(0, 0));
-                return points;
-            }
-            setupTemplates() {
-                // Generative templates
-                const addT = (name, pts) => this.Templates.push({Name: name, Points: this.Normalize(pts)});
-                
-                // Line
-                addT('line', [new Point(0,0), new Point(100,0)]);
-                
-                // Circle
-                let circlePts = [];
-                for (let i = 0; i < 36; i++) {
-                    circlePts.push(new Point(50 + 50 * Math.cos(i*Math.PI/18), 50 + 50 * Math.sin(i*Math.PI/18)));
-                }
-                addT('circle', circlePts);
-                
-                // Triangle
-                addT('triangle', [new Point(50,10), new Point(10,90), new Point(90,90), new Point(50,10)]);
-            }
-            Recognize(points) {
-                if(points.length < 10) return { Name: 'none', Score: 0 };
-                points = this.Normalize(points);
-                let b = Infinity;
-                let t = -1;
-                for (let i = 0; i < this.Templates.length; i++) {
-                    let d = this.DistanceAtBestAngle(points, this.Templates[i], -this.AngleRange, this.AngleRange, this.AnglePrecision);
-                    if (d < b) { b = d; t = i; }
-                }
-                let score = 1.0 - (b / this.HalfDiagonal);
-                return (t > -1 && score > 0.60) ? { Name: this.Templates[t].Name, Score: score } : { Name: 'none', Score: score };
-            }
-        }
-        
-        const recognizer = new GestureRecognizer();
+<!-- ───────────────────────── SECTION: OVERVIEW ───────────────────────── -->
+<section id="overview" class="section active">
+  <div class="section-header">
+    <span class="sec-icon">◈</span>
+    <h1>Overview</h1>
+  </div>
+  <div class="section-divider"></div>
 
-        init();
-        renderer.setAnimationLoop(animate);
+  <div class="grid-2" style="margin-bottom:1.4rem">
+    <div class="block" style="border-left-color:var(--primary)">
+      <div class="tag-row"><span class="tag-label">Title</span><span class="tag-value" style="color:var(--secondary)">Echo Weaver</span></div>
+      <div class="tag-row"><span class="tag-label">Genre</span><span class="tag-value">First-Person Gesture Defense</span></div>
+      <div class="tag-row"><span class="tag-label">Platform</span><span class="tag-value">WebXR · Quest 2 / 3 / Vision Pro</span></div>
+      <div class="tag-row"><span class="tag-label">Primary Input</span><span class="tag-value">Hand Tracking — zero controllers</span></div>
+      <div class="tag-row"><span class="tag-label">Session Length</span><span class="tag-value">Endless wave survival · 5–20 min</span></div>
+    </div>
+    <div class="block" style="border-left-color:var(--gold)">
+      <div class="tag-row"><span class="tag-label">Renderer</span><span class="tag-value" style="color:var(--gold)">Three.js r160 + WebXR API</span></div>
+      <div class="tag-row"><span class="tag-label">Language</span><span class="tag-value">TypeScript 5.x</span></div>
+      <div class="tag-row"><span class="tag-label">Build Tool</span><span class="tag-value">Vite 5 + Rollup</span></div>
+      <div class="tag-row"><span class="tag-label">Physics</span><span class="tag-value">Custom lightweight (no Cannon/Rapier)</span></div>
+      <div class="tag-row"><span class="tag-label">Target FPS</span><span class="tag-value">72 locked (Quest 2) · 90 (Quest 3)</span></div>
+    </div>
+  </div>
 
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x0a0a12);
-            scene.fog = new THREE.Fog(0x0a0a12, 2, 10);
+  <p><strong>Echo Weaver</strong> is an immersive, first-person WebXR defense game built around a single design north star: <em>your hands are the only controller.</em> All gameplay emerges from natural hand gestures detected via the WebXR Hand Input API. Players stand in a mystical circular chamber and protect a central Heart Stone from waves of corrupted energy orbs — catching them bare-handed and weaving protective spells through mid-air sigil gestures.</p>
+  <p>The game is designed to feel like a magic lesson: intuitive enough to begin playing within 60 seconds, yet deep enough to reward practiced dexterity and strategic spell sequencing across extended sessions.</p>
 
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-            camera.position.set(0, 1.6, 3); 
+  <h3>Core Fantasy</h3>
+  <div class="block" style="border-left-color:var(--accent)">
+    <p style="color:#e8d0f0;margin:0;font-style:italic">"You are an Echo Weaver — one of a forgotten order that does not cast spells <em>at</em> the world, but <em>through</em> it. Chaos already exists in the energy around you. Your gift is the ability to catch that chaos, shape it with intent, and release it back as order."</p>
+  </div>
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
-            document.body.appendChild(VRButton.createButton(renderer));
+  <h3>30-Second Core Loop</h3>
+  <div class="grid-4">
+    <div class="block" style="border-left-color:var(--muted)">
+      <div class="block-title" style="color:var(--muted)">1 · Sense</div>
+      <p style="margin:0;font-size:0.82rem;color:var(--muted)">Corrupted orbs spawn at the chamber perimeter and drift toward the Heart Stone.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--secondary)">
+      <div class="block-title" style="color:var(--secondary)">2 · Catch</div>
+      <p style="margin:0;font-size:0.82rem;color:var(--muted)">Raise open palm. An orb adheres to your hand on contact — one per hand simultaneously.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--primary)">
+      <div class="block-title" style="color:var(--primary)">3 · Weave</div>
+      <p style="margin:0;font-size:0.82rem;color:var(--muted)">Extend index finger, trace a sigil (○ — △) in the air to cast a spell.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--success)">
+      <div class="block-title" style="color:var(--success)">4 · Defend</div>
+      <p style="margin:0;font-size:0.82rem;color:var(--muted)">Spell activates, orb is consumed. Repeat before the Heart Stone falls.</p>
+    </div>
+  </div>
 
-            // --- Environment Setup ---
-            const grid = new THREE.GridHelper(20, 40, 0x222244, 0x111122);
-            scene.add(grid);
+  <h3>Design Principles</h3>
+  <div class="block" style="border-left-color:var(--muted)"><strong style="color:var(--gold)">Zero-Button Promise:</strong> <span style="font-size:0.88rem"> The game never requires a button press, trigger pull, or joystick movement. If a mechanic requires a button, the mechanic changes instead.</span></div>
+  <div class="block" style="border-left-color:var(--muted)"><strong style="color:var(--gold)">Failure is Forgiving:</strong> <span style="font-size:0.88rem"> Losing a held orb, missing a gesture, or taking Heart Stone damage should feel like a near-miss — not a punishment. Generous timers, clear visual warnings.</span></div>
+  <div class="block" style="border-left-color:var(--muted)"><strong style="color:var(--gold)">Show, Don't Tell:</strong> <span style="font-size:0.88rem"> All player guidance is environmental. Glowing palm lines, ghost sigils, and particle beacons teach without text or tutorial overlays.</span></div>
+</section>
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
-            scene.add(ambientLight);
+<!-- ───────────────────────── SECTION: ARCHITECTURE ───────────────────────── -->
+<section id="architecture" class="section">
+  <div class="section-header"><span class="sec-icon">⬡</span><h1>Architecture</h1></div>
+  <div class="section-divider"></div>
 
-            const pointLight = new THREE.PointLight(0x00ffff, 2, 10);
-            pointLight.position.set(0, 1.2, 0);
-            scene.add(pointLight);
+  <p>Echo Weaver uses an <strong>Entity-Component pattern</strong> with a central <code>GameManager</code> singleton orchestrating the main loop. WebXR session lifecycle is decoupled from game logic to allow hot-reloading during development and a clean shutdown path on session end.</p>
 
-            // --- Heart Stone ---
-            const stoneGeo = new THREE.IcosahedronGeometry(0.3, 1);
-            const stoneMat = new THREE.MeshStandardMaterial({
-                color: 0x00ffff, emissive: 0x008888, wireframe: true, transparent: true, opacity: 0.8
-            });
-            heartStone = new THREE.Mesh(stoneGeo, stoneMat);
-            heartStone.position.set(0, 1.2, -0.5);
-            scene.add(heartStone);
+  <h3>Directory Structure</h3>
+<pre>src/
+├── main.ts                   ← Vite entry; WebXR session bootstrap
+├── core/
+│   ├── GameManager.ts        ← Master loop, state machine (LOADING → MENU → PLAYING → PAUSED → GAME_OVER)
+│   ├── XRSessionManager.ts   ← WebXR init, framerate hints, input sources
+│   ├── SceneGraph.ts         ← Three.js scene, camera rig, environment geometry
+│   └── EventBus.ts           ← Decoupled pub/sub messaging between all modules
+├── hands/
+│   ├── HandTracker.ts        ← XRHand 25-joint sampling every animation frame
+│   ├── HandRenderer.ts       ← Ghost-hand mesh, fingertip glow, palm catch-FX
+│   ├── GestureRecognizer.ts  ← $1 Unistroke pipeline (see §4)
+│   └── GrabDetector.ts       ← Palm–orb proximity + orientation checks
+├── entities/
+│   ├── HeartStone.ts         ← Central artifact: health, visual states, damage events
+│   ├── OrbSpawner.ts         ← Wave config, 12 spawn positions, difficulty curve
+│   ├── Orb.ts                ← Per-orb: homing AI, instability timer, capture state
+│   └── Spell.ts              ← Base class + Shield / Beam / Repulse subclasses
+├── physics/
+│   └── CollisionManager.ts   ← 3D spatial hash grid broadphase; sphere-sphere narrowphase
+├── ui/
+│   ├── WristHUD.ts           ← Score bracelet, wave indicator on dominant wrist
+│   ├── PalmGuide.ts          ← Catch-zone reticule lines on open empty palm
+│   └── SigilReminder.ts      ← Ghost sigil halo when holding orb + pointing
+├── audio/
+│   └── AudioManager.ts       ← Spatial SFX via Web Audio PannerNode; dynamic layered music
+└── utils/
+    ├── Math3D.ts             ← Vector helpers, frustum checks, dot-product utilities
+    └── PathSampler.ts        ← Fixed-rate 20Hz index-fingertip path recorder</pre>
 
-            // --- Trail Setup ---
-            trailGeo = new THREE.BufferGeometry();
-            trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
-            trailGeo.setDrawRange(0, 0);
-            const trailMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 3, transparent: true, opacity: 0.8 });
-            trailLine = new THREE.Line(trailGeo, trailMat);
-            scene.add(trailLine);
+  <h3>State Machine</h3>
+  <div class="block" style="border-left-color:var(--primary)">
+    <div class="block-title" style="color:var(--primary)">GameManager — State Transitions</div>
+    <div class="tl-bar">
+      <div class="tl-node">LOADING</div><span class="tl-arrow">→</span>
+      <div class="tl-node">MENU</div><span class="tl-arrow">→</span>
+      <div class="tl-node">PLAYING</div><span class="tl-arrow">⇄</span>
+      <div class="tl-node">PAUSED</div><span class="tl-arrow">→</span>
+      <div class="tl-node">GAME_OVER</div>
+    </div>
+    <p style="font-size:0.83rem;color:var(--muted);margin:0">Transitions are fired via <code>EventBus</code> events: <code>xr:session-start</code>, <code>heartstone:depleted</code>, <code>gesture:both-fists-held-2s</code> (pause). The state machine gates which subsystems receive <code>update(dt)</code> calls — e.g. collision solving only runs in the <code>PLAYING</code> state.</p>
+  </div>
 
-            // --- Test Orbs ---
-            createOrb(new THREE.Vector3(-0.5, 1.2, -0.2), 0xff0055); // Left Orb
-            createOrb(new THREE.Vector3(0.5, 1.2, -0.2), 0xaa00ff);  // Right Orb
+  <h3>Frame Loop</h3>
+<pre>// XRSessionManager.ts — registered as the XRSession animation-frame callback
+function onXRFrame(time: number, frame: XRFrame) {
+  session.requestAnimationFrame(onXRFrame);            // re-queue immediately (top priority)
 
-            setupHand(0); // Left
-            setupHand(1); // Right
+  const dt = Math.min((time - lastTime) / 1000, 0.05); // cap at 50ms to handle tab-hidden spikes
+  lastTime = time;
 
-            window.addEventListener('resize', onWindowResize);
-        }
+  // Execution order is strict — do not reorder
+  HandTracker.update(frame, referenceSpace);            // 1. Raw joint data (highest priority)
+  GestureRecognizer.update(dt);                        // 2. Sigil path recording + recognition
+  GrabDetector.update(dt);                             // 3. Catch / release / fling logic
+  GameManager.update(dt);                              // 4. Orbs, spells, wave progression
+  CollisionManager.solve(dt);                          // 5. Physics resolution pass
+  renderer.render(scene, camera);                      // 6. Draw to XR display
+}</pre>
 
-        function createOrb(position, colorHex) {
-            const geo = new THREE.SphereGeometry(0.08, 16, 16);
-            const mat = new THREE.MeshStandardMaterial({
-                color: colorHex, emissive: colorHex, emissiveIntensity: 0.5, roughness: 0.2, metalness: 0.8
-            });
-            const orb = new THREE.Mesh(geo, mat);
-            orb.position.copy(position);
-            orb.userData = { baseY: position.y, phase: Math.random() * Math.PI * 2, heldBy: null };
-            scene.add(orb);
-            orbs.push(orb);
-        }
+  <h3>Key Technical Dependencies</h3>
+  <div class="grid-2">
+    <div class="block" style="border-left-color:var(--secondary)">
+      <div class="block-title" style="color:var(--secondary)">Runtime Libraries</div>
+      <div class="tag-row"><span class="tag-label">three</span><span class="tag-value">r160 — renderer, geometry, materials, math</span></div>
+      <div class="tag-row"><span class="tag-label">howler.js</span><span class="tag-value">v2.2 — audio asset loading &amp; management</span></div>
+      <div class="tag-row"><span class="tag-label">webxr-polyfill</span><span class="tag-value">Fallback for non-native browsers</span></div>
+    </div>
+    <div class="block" style="border-left-color:var(--gold)">
+      <div class="block-title" style="color:var(--gold)">Dev Toolchain</div>
+      <div class="tag-row"><span class="tag-label">vite 5</span><span class="tag-value">Build + HMR dev server with HTTPS (required for WebXR)</span></div>
+      <div class="tag-row"><span class="tag-label">typescript 5</span><span class="tag-value">Strict mode enabled; path aliases configured</span></div>
+      <div class="tag-row"><span class="tag-label">vitest</span><span class="tag-value">Unit tests for GestureRecognizer + Math3D</span></div>
+    </div>
+  </div>
+</section>
 
-        function setupHand(index) {
-            const hand = renderer.xr.getHand(index);
-            scene.add(hand);
+<!-- ───────────────────────── SECTION: HAND TRACKING ───────────────────────── -->
+<section id="handtracking" class="section">
+  <div class="section-header"><span class="sec-icon">✋</span><h1>Hand Tracking</h1></div>
+  <div class="section-divider"></div>
 
-            const jointMat = new THREE.MeshBasicMaterial({
-                color: 0x00ffcc, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending
-            });
+  <p>Hand tracking is the game's soul. The <strong>WebXR Hand Input API</strong> exposes 25 named joints per hand as <code>XRJointSpace</code> objects, each providing a 4×4 pose matrix (world-space position + orientation) and a radius hint. All 25 joints are sampled every animation frame inside <code>onXRFrame</code> before any game logic runs.</p>
 
-            hand.userData.jointMeshes = {};
-            hand.userData.isHolding = false;
-            hand.userData.handedness = index === 0 ? 'left' : 'right';
+  <h3>Joint Reference — Joints Used by Echo Weaver</h3>
+  <div class="block" style="border-left-color:var(--secondary)">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem;font-size:0.82rem">
+      <div style="padding:0.3rem 0;border-bottom:1px solid var(--border);display:flex;gap:0.5rem"><code style="min-width:200px;font-size:0.75rem">wrist</code><span style="color:var(--muted)">Root — all wrist-relative transforms</span></div>
+      <div style="padding:0.3rem 0;border-bottom:1px solid var(--border);display:flex;gap:0.5rem"><code style="min-width:200px;font-size:0.75rem">index-finger-tip</code><span style="color:var(--muted)">Sigil tracing primary draw point</span></div>
+      <div style="padding:0.3rem 0;border-bottom:1px solid var(--border);display:flex;gap:0.5rem"><code style="min-width:200px;font-size:0.75rem">index-finger-phalanx-proximal</code><span style="color:var(--muted)">Pointing-pose extension check</span></div>
+      <div style="padding:0.3rem 0;border-bottom:1px solid var(--border);display:flex;gap:0.5rem"><code style="min-width:200px;font-size:0.75rem">middle / ring / pinky tips</code><span style="color:var(--muted)">Curl detection for open-palm &amp; fist poses</span></div>
+      <div style="padding:0.3rem 0;border-bottom:1px solid var(--border);display:flex;gap:0.5rem"><code style="min-width:200px;font-size:0.75rem">thumb-tip</code><span style="color:var(--muted)">Pinch gesture (reserved for future spells)</span></div>
+      <div style="padding:0.3rem 0;display:flex;gap:0.5rem"><code style="min-width:200px;font-size:0.75rem">palm (derived — see below)</code><span style="color:var(--muted)">Catch-orientation &amp; push gesture</span></div>
+    </div>
+  </div>
 
-            hand.addEventListener('connected', (event) => { hand.userData.xrInputSource = event.data; });
-            hands[index] = hand;
-        }
+  <h3>Palm Normal Derivation</h3>
+  <p>The WebXR spec does not expose a dedicated palm joint. We derive the palm center and outward-facing normal each frame using three metacarpal positions and a cross product:</p>
+<pre>// HandTracker.ts
+function getPalmData(hand: XRHand, frame: XRFrame, ref: XRReferenceSpace) {
+  const pose  = (j: XRHandJoint) => frame.getJointPose(hand.get(j), ref)!;
+  const toVec = (p: XRJointPose) =>
+    new THREE.Vector3(p.transform.position.x, p.transform.position.y, p.transform.position.z);
 
-        function applyEMA(jointName, currentPos) {
-            if (!smoothedJoints.has(jointName)) {
-                smoothedJoints.set(jointName, currentPos.clone());
-                return currentPos.clone();
-            }
-            const previousPos = smoothedJoints.get(jointName);
-            const smoothed = new THREE.Vector3(
-                (currentPos.x * EMA_ALPHA) + (previousPos.x * (1 - EMA_ALPHA)),
-                (currentPos.y * EMA_ALPHA) + (previousPos.y * (1 - EMA_ALPHA)),
-                (currentPos.z * EMA_ALPHA) + (previousPos.z * (1 - EMA_ALPHA))
-            );
-            smoothedJoints.set(jointName, smoothed);
-            return smoothed;
-        }
+  const wrist  = pose("wrist");
+  const midMC  = pose("middle-finger-metacarpal");
+  const idxMC  = pose("index-finger-metacarpal");
+  const pnkMC  = pose("pinky-finger-metacarpal");
 
-        function isHandOpen(hand) {
-            if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
-            const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist > 0.10; // Open hand threshold
-        }
+  // Palm center = midpoint of wrist and middle metacarpal base
+  const palmCenter = toVec(wrist).lerp(toVec(midMC), 0.5);
 
-        function isHandClosed(hand) {
-            if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
-            const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist < 0.07; // Tight fist threshold (Hysteresis prevents accidental drops)
-        }
+  // Normal via cross product of two vectors lying in the palm plane
+  const v1 = toVec(idxMC).sub(toVec(pnkMC));   // lateral axis (index → pinky)
+  const v2 = toVec(wrist).sub(toVec(midMC));    // proximal axis (wrist → fingers)
+  const normal = new THREE.Vector3().crossVectors(v1, v2).normalize();
 
-        function isPinching(hand) {
-            if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['index-finger-tip']) return false;
-            const dist = hand.joints['thumb-tip'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist < PINCH_THRESH; // Pinch threshold
-        }
+  if (isRightHand) normal.negate();              // flip winding for right hand
 
-        function fireSpell(type, origin) {
-            // Visual feedback for recognized spells
-            if (type === 'line') {
-                const geo = new THREE.CylinderGeometry(0.02, 0.02, 2);
-                geo.translate(0, 1, 0); // Pivot at base
-                geo.rotateX(Math.PI / 2); // Point forward
-                const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8});
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(origin);
-                mesh.quaternion.copy(camera.quaternion); // Fire where looking
-                scene.add(mesh);
-                setTimeout(() => scene.remove(mesh), 500);
-            } else if (type === 'circle') {
-                const geo = new THREE.SphereGeometry(0.5, 16, 16);
-                const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.5});
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(origin);
-                scene.add(mesh);
-                setTimeout(() => scene.remove(mesh), 2000);
-            } else if (type === 'triangle') {
-                const geo = new THREE.IcosahedronGeometry(0.1, 0);
-                const mat = new THREE.MeshBasicMaterial({color: 0xffaa00, wireframe: true});
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(origin);
-                scene.add(mesh);
-                
-                // Animate expansion
-                const expInt = setInterval(() => {
-                    mesh.scale.multiplyScalar(1.2);
-                    mat.opacity -= 0.1;
-                    if(mat.opacity <= 0) { clearInterval(expInt); scene.remove(mesh); }
-                }, 50);
-            }
-        }
+  return { center: palmCenter, normal, radius: wrist.radius * 3.5 };
+}</pre>
 
-        function processGesture() {
-            if (drawPoints3D.length < 10) return;
+  <h3>Open-Palm Pose Detection</h3>
+<pre>// GrabDetector.ts — returns true when all four fingers are extended
+function isOpenPalm(hand: HandData): boolean {
+  return ["index", "middle", "ring", "pinky"].every(finger => {
+    const tipDist  = hand.joints[`${finger}-finger-tip`].position
+                       .distanceTo(hand.joints.wrist.position);
+    const baseDist = hand.joints[`${finger}-finger-metacarpal`].position
+                       .distanceTo(hand.joints.wrist.position);
+    // Tip must be measurably farther from wrist than metacarpal base
+    return tipDist > baseDist * 1.15; // 15% headroom absorbs tracking noise
+  });
+}</pre>
 
-            // Project 3D points to 2D Screen Space
-            const points2D = drawPoints3D.map(pt3d => {
-                const vec = pt3d.clone().project(camera);
-                // Map from NDC (-1 to 1) to a pixel-like scale for the recognizer
-                return new Point((vec.x + 1) * 500, (1 - vec.y) * 500); 
-            });
+  <h3>Tracking-Loss Graceful Degradation</h3>
+  <div class="block" style="border-left-color:var(--accent)">
+    <div class="block-title" style="color:var(--accent)">Protocol — All timers reset on hand re-acquisition</div>
+    <div class="deg-row">
+      <span class="deg-time" style="color:var(--success)">0 – 100 ms</span>
+      <span style="color:var(--text)">Last-known pose held. No visual change. Player unlikely to notice.</span>
+    </div>
+    <div class="deg-row">
+      <span class="deg-time" style="color:var(--gold)">100 – 500 ms</span>
+      <span style="color:var(--text)">Hand mesh fades to 30% opacity. Held orb detaches from hand and hovers in world-space at last-known position.</span>
+    </div>
+    <div class="deg-row">
+      <span class="deg-time" style="color:var(--accent)">500 ms – 3 s</span>
+      <span style="color:var(--text)">Hand mesh hidden entirely. Orb continues hovering; emits a slow pulse-beacon of particles to mark its location.</span>
+    </div>
+    <div class="deg-row" style="margin-bottom:0">
+      <span class="deg-time" style="color:var(--accent)">3 s +</span>
+      <span style="color:var(--text)">Orb falls slowly (0.5 m/s²) and de-spawns on chamber floor contact. No damage dealt — timeout is intentionally generous.</span>
+    </div>
+  </div>
 
-            const result = recognizer.Recognize(points2D);
-            console.log("Casted: ", result.Name, "Score: ", result.Score);
+  <h3>Pointing Pose (Sigil-Trace Enable)</h3>
+<pre>// HandTracker.ts — index extended, all others curled
+function isPointing(hand: HandData): boolean {
+  const indexExtended = (() => {
+    const tip  = hand.joints["index-finger-tip"].position;
+    const base = hand.joints["index-finger-metacarpal"].position;
+    return tip.distanceTo(hand.joints.wrist.position) > base.distanceTo(hand.joints.wrist.position) * 1.2;
+  })();
 
-            if (result.Name !== 'none') {
-                // Find and destroy the held orb
-                const heldOrbIndex = orbs.findIndex(o => o.userData.heldBy === activeCastingHand);
-                if (heldOrbIndex > -1) {
-                    const origin = orbs[heldOrbIndex].position.clone();
-                    scene.remove(orbs[heldOrbIndex]);
-                    orbs.splice(heldOrbIndex, 1);
-                    
-                    fireSpell(result.Name, origin);
-                    
-                    // Reset hand state
-                    const handIdx = activeCastingHand === 'left' ? 0 : 1;
-                    hands[handIdx].userData.isHolding = false;
-                }
-            }
-        }
+  const othersCurled = ["middle","ring","pinky"].every(f => {
+    const tip  = hand.joints[`${f}-finger-tip`].position;
+    const base = hand.joints[`${f}-finger-metacarpal`].position;
+    return tip.distanceTo(hand.joints.wrist.position) < base.distanceTo(hand.joints.wrist.position) * 1.05;
+  });
 
-        function updateHands(timeDelta) {
-            hands.forEach(hand => {
-                if (!hand || !hand.joints) return;
+  return indexExtended && othersCurled;
+}</pre>
+</section>
 
-                const wristSpace = hand.joints['wrist'];
-                if (!wristSpace || !wristSpace.position) return; 
+<!-- ───────────────────────── SECTION: GESTURE SYSTEM ───────────────────────── -->
+<section id="gesture" class="section">
+  <div class="section-header"><span class="sec-icon">✦</span><h1>Gesture System</h1></div>
+  <div class="section-divider"></div>
 
-                // Render ghosts and apply EMA
-                Object.keys(hand.joints).forEach(jointName => {
-                    const joint = hand.joints[jointName];
-                    if (!joint.position) return;
+  <p>The gesture pipeline uses a <strong style="color:var(--gold)">two-phase design</strong>: continuous Path Recording feeds a template-matching Recognizer on demand. The system must balance high recall (don't miss valid gestures) with high precision (no false positives during casual hand movement).</p>
 
-                    if (!hand.userData.jointMeshes[jointName]) {
-                        const geo = new THREE.SphereGeometry(jointName.includes('tip') ? 0.012 : 0.008, 8, 8);
-                        const mat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.3 });
-                        const mesh = new THREE.Mesh(geo, mat);
-                        scene.add(mesh);
-                        hand.userData.jointMeshes[jointName] = mesh;
-                    }
+  <h3>Phase 1 — Path Recording (PathSampler)</h3>
+  <p>Recording activates only when the player state is <em>orb-held + index-pointing</em>. The index fingertip position is projected into <strong>camera-relative 2D NDC space</strong> — this normalises for body rotation and variable orb-holding distance from the headset.</p>
+<pre>// PathSampler.ts
+const SAMPLE_HZ  = 20;       // one sample every 50 ms
+const MAX_POINTS = 40;       // 2-second rolling window
+const MIN_DELTA  = 0.008;    // skip near-stationary samples (NDC units)
 
-                    const mesh = hand.userData.jointMeshes[jointName];
-                    const uniqueJointId = `${hand.userData.handedness}_${jointName}`;
-                    const smoothedPos = applyEMA(uniqueJointId, joint.position);
-                    mesh.position.copy(smoothedPos);
-                    mesh.quaternion.copy(joint.quaternion);
-                });
+class PathSampler {
+  private pts: THREE.Vector2[] = [];
+  private last = 0;
 
-                const isOp = isHandOpen(hand);
-                const isClosed = isHandClosed(hand);
-                const pinching = isPinching(hand);
-                const wristPos = hand.joints['wrist'].position;
+  update(tipWorld: THREE.Vector3, cam: THREE.Camera, t: number) {
+    if (t - this.last < 1000 / SAMPLE_HZ) return;
+    this.last = t;
 
-                // Grab / Drop
-                if (hand.userData.isHolding && isClosed && !isDrawing) {
-                    orbs.forEach(orb => {
-                        if (orb.userData.heldBy === hand.userData.handedness) {
-                            orb.userData.heldBy = null; 
-                            orb.userData.baseY = orb.position.y; 
-                        }
-                    });
-                    hand.userData.isHolding = false;
-                }
+    // Project 3D world position → 2D Normalised Device Coordinates (-1..+1)
+    const ndc = tipWorld.clone().project(cam);
+    const p   = new THREE.Vector2(ndc.x, ndc.y);
 
-                if (!hand.userData.isHolding && isOp) {
-                    for (let i = 0; i < orbs.length; i++) {
-                        const orb = orbs[i];
-                        if (orb.userData.heldBy !== null) continue; 
-                        if (wristPos.distanceTo(orb.position) < CATCH_RADIUS) {
-                            orb.userData.heldBy = hand.userData.handedness;
-                            hand.userData.isHolding = true;
-                            break; 
-                        }
-                    }
-                }
+    // Only record meaningful movement
+    if (!this.pts.length || p.distanceTo(this.pts.at(-1)!) > MIN_DELTA) {
+      this.pts.push(p);
+      if (this.pts.length > MAX_POINTS) this.pts.shift(); // evict oldest
+    }
+  }
 
-                // Spellcasting / Drawing Logic via Pinch
-                if (hand.userData.isHolding) {
-                    if (pinching) {
-                        // Start / Continue drawing
-                        if (!isDrawing) {
-                            isDrawing = true;
-                            currentTrailCount = 0;
-                            drawPoints3D = [];
-                            activeCastingHand = hand.userData.handedness;
-                        }
-                        
-                        if (currentTrailCount < MAX_TRAIL_POINTS && activeCastingHand === hand.userData.handedness) {
-                            // Calculate midpoint between thumb and index for cleaner ink origin
-                            const pinchPoint = new THREE.Vector3().addVectors(
-                                hand.joints['thumb-tip'].position, 
-                                hand.joints['index-finger-tip'].position
-                            ).multiplyScalar(0.5);
+  getPath() { return [...this.pts]; }
+  reset()   { this.pts = []; }
+}</pre>
 
-                            drawPoints3D.push(pinchPoint.clone());
-                            trailPositions[currentTrailCount * 3] = pinchPoint.x;
-                            trailPositions[currentTrailCount * 3 + 1] = pinchPoint.y;
-                            trailPositions[currentTrailCount * 3 + 2] = pinchPoint.z;
-                            currentTrailCount++;
-                            trailGeo.setDrawRange(0, currentTrailCount);
-                            trailGeo.attributes.position.needsUpdate = true;
-                        }
-                    } else if (isDrawing && activeCastingHand === hand.userData.handedness) {
-                        // Released the pinch. Instantly cast.
-                        isDrawing = false;
-                        processGesture();
-                        trailGeo.setDrawRange(0, 0); // Clear trail visually
-                        currentTrailCount = 0;
-                    }
-                }
-            });
-        }
+  <h3>Phase 2 — $1 Unistroke Recognizer</h3>
+  <p>We implement a variant of the <strong style="color:var(--gold)">$1 Unistroke Recognizer</strong> (Wobbrock et al., 2007) — a well-studied algorithm proven robust for single-stroke recognition on low-sample-rate input. It normalises paths for scale, position, and rotation before template comparison via golden-section search.</p>
+<pre>// GestureRecognizer.ts
+class DollarOneRecognizer {
+  private readonly N    = 64;                      // resample to N equidistant points
+  private readonly SZ   = 250;                     // scale into SZ×SZ bounding box
+  private readonly ORI  = new THREE.Vector2(0, 0); // translate centroid to origin
+  private readonly HALF = Math.sqrt(2) * this.SZ / 2; // half-diagonal of bounding box
+  private readonly PHI  = 0.5 * (-1 + Math.sqrt(5));  // golden ratio for GSS
 
-        function updateOrbs(time) {
-            orbs.forEach(orb => {
-                if (orb.userData.heldBy) {
-                    const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
-                    const hand = hands[handIndex];
-                    if (hand && hand.joints && hand.joints['wrist']) {
-                        orb.position.lerp(hand.joints['wrist'].position, 0.2); 
-                    }
-                } else {
-                    orb.position.y = orb.userData.baseY + Math.sin(time * 2 + orb.userData.phase) * 0.05;
-                }
-            });
-        }
+  recognize(raw: THREE.Vector2[]): { name: string; score: number } | null {
+    if (raw.length < 10) return null;
 
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+    // Normalisation pipeline
+    const resampled  = this.resample(raw, this.N);
+    const radians    = this.indicativeAngle(resampled);
+    const rotated    = this.rotateBy(resampled, -radians);
+    const scaled     = this.scaleTo(rotated, this.SZ);
+    const pts        = this.translateTo(scaled, this.ORI);
 
-        let lastTime = 0;
-        function animate(time, frame) {
-            const timeSeconds = time * 0.001;
-            const timeDelta = timeSeconds - lastTime;
-            lastTime = timeSeconds;
-            
-            heartStone.rotation.y += 0.01;
-            heartStone.rotation.x += 0.005;
+    // Template matching — golden-section search over ±180°
+    let best = Infinity, bestName = "";
+    for (const [name, tmpl] of Object.entries(TEMPLATES)) {
+      const d = this.distanceAtBestAngle(pts, tmpl, -Math.PI, Math.PI, Math.PI / 90);
+      if (d < best) { best = d; bestName = name; }
+    }
 
-            if (renderer.xr.isPresenting) {
-                updateHands(timeDelta);
-            }
+    const score = 1 - best / this.HALF;
+    return score > 0.72 ? { name: bestName, score } : null; // confidence threshold
+  }
 
-            updateOrbs(timeSeconds);
-            renderer.render(scene, camera);
-        }
-    </script>
+  // --- Helper stubs (full implementation in source) ---
+  private resample(pts: THREE.Vector2[], n: number): THREE.Vector2[]        { return pts; }
+  private indicativeAngle(pts: THREE.Vector2[]): number                     { return 0; }
+  private rotateBy(pts: THREE.Vector2[], r: number): THREE.Vector2[]        { return pts; }
+  private scaleTo(pts: THREE.Vector2[], sz: number): THREE.Vector2[]        { return pts; }
+  private translateTo(pts: THREE.Vector2[], p: THREE.Vector2): THREE.Vector2[] { return pts; }
+  private distanceAtBestAngle(a: THREE.Vector2[], b: THREE.Vector2[],
+    lo: number, hi: number, thresh: number): number                          { return 0; }
+}</pre>
+
+  <h3>The Three Sigils</h3>
+  <div class="grid-3">
+    <div class="block" style="border-left-color:var(--secondary)">
+      <div class="block-title" style="color:var(--secondary)">○ &nbsp; Circle → Shield Bubble</div>
+      <div class="tag-row"><span class="tag-label">Trace</span><span class="tag-value">Clockwise O from ~12 o'clock position</span></div>
+      <div class="tag-row"><span class="tag-label">Tolerance</span><span class="tag-value">Scale &amp; orientation invariant. Min diameter 0.15 NDC</span></div>
+      <div class="tag-row"><span class="tag-label">Feedback</span><span class="tag-value" style="color:var(--secondary)">Orb glows blue → expands into translucent dome</span></div>
+    </div>
+    <div class="block" style="border-left-color:var(--gold)">
+      <div class="block-title" style="color:var(--gold)">— &nbsp; Line → Energy Beam</div>
+      <div class="tag-row"><span class="tag-label">Trace</span><span class="tag-value">Horizontal stroke, either L→R or R→L</span></div>
+      <div class="tag-row"><span class="tag-label">Tolerance</span><span class="tag-value">±30° from horizontal. Min length 0.2 NDC</span></div>
+      <div class="tag-row"><span class="tag-label">Feedback</span><span class="tag-value" style="color:var(--gold)">Orb glows gold → fires energy lance forward</span></div>
+    </div>
+    <div class="block" style="border-left-color:var(--accent)">
+      <div class="block-title" style="color:var(--accent)">△ &nbsp; Triangle → Repulse Wave</div>
+      <div class="tag-row"><span class="tag-label">Trace</span><span class="tag-value">Three connected strokes forming △ or ▽</span></div>
+      <div class="tag-row"><span class="tag-label">Tolerance</span><span class="tag-value">3 inflection points required. Aspect ratio 0.6–1.4</span></div>
+      <div class="tag-row"><span class="tag-label">Feedback</span><span class="tag-value" style="color:var(--accent)">Orb glows red → spherical shockwave erupts</span></div>
+    </div>
+  </div>
+
+  <h3>Sigil Trail Visual</h3>
+<pre>// SigilTrail.ts — ephemeral glow-trail left by the index fingertip
+class SigilTrail {
+  private pts: Array&lt;{ pos: THREE.Vector3; born: number }&gt; = [];
+  private readonly LIFE = 1200; // milliseconds before full fade
+
+  addPoint(worldPos: THREE.Vector3, now: number) {
+    this.pts.push({ pos: worldPos.clone(), born: now });
+  }
+
+  update(now: number) {
+    this.pts = this.pts.filter(p => now - p.born &lt; this.LIFE);
+
+    // Rebuild LineSegments geometry; vertex alpha = 1 - (age / LIFE)
+    // Color: matches held orb color (default: cyan)
+  }
+
+  flash(color: number, durationMs: number) {
+    // Override material to 'color' at full opacity for durationMs on successful recognition
+    // Then smoothly returns to orb-tint color
+  }
+}</pre>
+
+  <h3>Recognizer Accuracy Targets</h3>
+  <div class="grid-3">
+    <div class="kpi"><div class="kpi-val" style="color:var(--success)">≥ 92%</div><div class="kpi-lbl">Recognition accuracy on valid gestures</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--success)">&lt; 2%</div><div class="kpi-lbl">False positive rate per 100 idle frames</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--secondary)">0.72</div><div class="kpi-lbl">Minimum confidence score threshold</div></div>
+  </div>
+</section>
+
+<!-- ───────────────────────── SECTION: SPELLCASTING ───────────────────────── -->
+<section id="spells" class="section">
+  <div class="section-header"><span class="sec-icon">⚡</span><h1>Spellcasting</h1></div>
+  <div class="section-divider"></div>
+
+  <p>All spells inherit from a common <code>Spell</code> base class and are instantiated by <code>SpellFactory</code> upon gesture recognition success. The consuming orb is destroyed with a 300 ms dissolve animation before the spell activates — this intentional delay makes the cast feel weighted and deliberate.</p>
+
+<pre>// Spell.ts — base class for all Echo Weaver spells
+abstract class Spell {
+  protected lifeTime = 0;
+  abstract readonly MAX_LIFE: number;
+
+  constructor(protected scene: THREE.Scene, protected origin: THREE.Vector3) {
+    this.origin = origin.clone();
+    this.spawn();
+  }
+
+  abstract spawn(): void;             // set up geometry + audio
+  abstract update(dt: number): void;  // advance simulation each frame
+  abstract dispose(): void;           // clean up Three.js objects
+
+  get isExpired(): boolean { return this.lifeTime >= this.MAX_LIFE; }
+}</pre>
+
+  <h3 style="color:var(--secondary)">Shield Bubble — Circle Sigil</h3>
+  <div class="block" style="border-left-color:var(--secondary)">
+    <div class="tag-row"><span class="tag-label">Duration</span><span class="tag-value" style="color:var(--secondary)">8 seconds</span></div>
+    <div class="tag-row"><span class="tag-label">Radius</span><span class="tag-value">0.6 m (scales ±30% based on how large the circle was drawn)</span></div>
+    <div class="tag-row"><span class="tag-label">Position</span><span class="tag-value">Centroid of traced circle; depth auto-set to 1.5 m from camera</span></div>
+    <div class="tag-row"><span class="tag-label">Capacity</span><span class="tag-value">Absorbs 3 orb impacts before shattering</span></div>
+    <p style="font-size:0.85rem;color:var(--muted);margin:0.6rem 0 0">Rendered with a custom ShaderMaterial using Fresnel rim lighting and an animated hexagonal tile pattern on a <code>SphereGeometry</code>. Each orb impact emits a ripple displacement wave radiating from the contact point. At the 3rd impact the shield shatters into 40 additive-blended glass-shard particles.</p>
+  </div>
+
+  <h3 style="color:var(--gold)">Energy Beam — Line Sigil</h3>
+  <div class="block" style="border-left-color:var(--gold)">
+    <div class="tag-row"><span class="tag-label">Duration</span><span class="tag-value" style="color:var(--gold)">0.3 s (instant pierce; visual lingers briefly)</span></div>
+    <div class="tag-row"><span class="tag-label">Direction</span><span class="tag-value">Camera forward vector at the exact moment of cast</span></div>
+    <div class="tag-row"><span class="tag-label">Range</span><span class="tag-value">Unlimited — hits first orb in ray path</span></div>
+    <div class="tag-row"><span class="tag-value">Destroys orb; spawns 6 directional spark particles</span></div>
+    <p style="font-size:0.85rem;color:var(--muted);margin:0.6rem 0 0">Implemented as a <code>THREE.Raycaster</code> against all active orb bounding spheres in a single frame. A visible <code>CylinderGeometry</code> beam mesh stretches from orb origin to hit point and tapers to 0 radius over 300 ms. Color: solar gold with an emissive bloom pass.</p>
+  </div>
+
+  <h3 style="color:var(--accent)">Repulse Wave — Triangle Sigil</h3>
+  <div class="block" style="border-left-color:var(--accent)">
+    <div class="tag-row"><span class="tag-label">Duration</span><span class="tag-value" style="color:var(--accent)">1.2 s (expanding spherical wave)</span></div>
+    <div class="tag-row"><span class="tag-label">Origin</span><span class="tag-value">Player head position (camera world-space origin)</span></div>
+    <div class="tag-row"><span class="tag-label">Wave radius</span><span class="tag-value">Expands 0 → 4 m over 1.2 s (eased cubic out)</span></div>
+    <div class="tag-row"><span class="tag-value">All orbs inside radius: velocity reversed, ×2 outward</span></div>
+    <p style="font-size:0.85rem;color:var(--muted);margin:0.6rem 0 0">Expanding <code>SphereGeometry</code> with additive blending and a pulsing opacity curve that peaks at 0.5 then fades to 0. Per-orb impulse each frame: <code>force = (waveRadius − distToCenter) × 8</code>.</p>
+  </div>
+
+  <h3>Full Cast Sequence</h3>
+<pre>// SpellFactory.ts — fires when GestureRecognizer emits a successful result
+function onGestureRecognized(g: GestureResult, hand: HandData) {
+  // 1. Haptic pulse (if XRHapticsActuator is available on this device)
+  hand.source.gamepad?.hapticActuators[0]?.pulse(0.8, 120 /* ms */);
+
+  // 2. Flash the sigil trail bright white for visual confirmation
+  sigilTrail.flash(0xffffff, 200);
+
+  // 3. Begin 300 ms orb dissolve animation
+  hand.heldOrb?.beginConsumeAnimation(300);
+
+  // 4. Spawn the spell after orb dissolve completes
+  setTimeout(() => {
+    const origin = hand.joints.wrist.position.clone();
+    switch (g.name) {
+      case "circle":   spells.push(new ShieldSpell(scene, origin));  break;
+      case "line":     spells.push(new BeamSpell(scene, origin));    break;
+      case "triangle": spells.push(new RepulseSpell(scene, origin)); break;
+    }
+    hand.heldOrb = null; // hand is now free to catch the next orb
+  }, 300);
+}</pre>
+
+  <h3>Emergency Gestures (No Orb Required)</h3>
+  <div class="grid-2">
+    <div class="block" style="border-left-color:var(--muted)">
+      <div class="block-title" style="color:var(--muted)">Two-Handed Push — Emergency Deflect</div>
+      <p style="font-size:0.85rem;color:var(--muted);margin:0">Both palms face outward simultaneously; both hands make a rapid forward thrust (velocity &gt; 0.8 m/s). Creates a weak gust: nearby orbs within 1.5 m are slowed 40% for 2 s. Single-use cooldown: 3 s.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--muted)">
+      <div class="block-title" style="color:var(--muted)">Two-Handed Zoom — Situational Awareness</div>
+      <p style="font-size:0.85rem;color:var(--muted);margin:0">Both hands held up, palms facing each other. Pinch together or pull apart to scale the camera FOV (50°–90°). Useful for tracking distant threats. No cooldown.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── SECTION: PHYSICS ───────────────────────── -->
+<section id="physics" class="section">
+  <div class="section-header"><span class="sec-icon">◎</span><h1>Physics &amp; Collision</h1></div>
+  <div class="section-divider"></div>
+
+  <p>Echo Weaver uses a bespoke, lightweight physics system with <strong>no external physics engine dependency</strong>. This keeps the bundle small and avoids WASM loading overhead on mobile-class XR hardware. All simulation is frame-rate independent via delta-time integration, and all forces are tuned for feel rather than physical accuracy.</p>
+
+  <h3>Orb Movement Model</h3>
+<pre>// Orb.ts — homing AI with configurable steering strength
+class Orb {
+  position  = new THREE.Vector3();
+  velocity  = new THREE.Vector3();
+  speed     = 0.25;                 // m/s base (increases each wave: +0.03 m/s per wave)
+  readonly radius = 0.06;           // 6 cm sphere collider
+
+  update(dt: number, heartPos: THREE.Vector3) {
+    const toHeart = heartPos.clone().sub(this.position).normalize();
+    const dist    = this.position.distanceTo(heartPos);
+
+    // Homing coefficient: strong at distance, weakens in final approach
+    // This prevents orbs swarming in a perfectly straight line (feels more alive)
+    const k = THREE.MathUtils.mapLinear(dist, 0.5, 3.0, 0.40, 0.08);
+    this.velocity.lerp(toHeart.multiplyScalar(this.speed), k * dt * 60);
+    this.velocity.clampLength(0, this.speed * 1.2);    // cap velocity magnitude
+
+    this.position.addScaledVector(this.velocity, dt);
+    this.mesh.position.copy(this.position);
+  }
+
+  // --- Instability when held past the 5s safe window ---
+  private holdTimer = 0;
+  updateHeld(dt: number) {
+    this.holdTimer += dt;
+    const t = Math.min(this.holdTimer / 5.0, 1.0); // normalised 0 → 1
+
+    if (t > 0.60) this.showInstabilityVFX(t);    // cracks appear, spark particles intensify
+    if (t >= 1.0) this.forceEject();              // drop orb + area-of-effect warning pulse
+  }
+}</pre>
+
+  <h3>Wave Progression</h3>
+  <div class="block" style="border-left-color:var(--primary)">
+    <div class="tag-row"><span class="tag-label">Starting orbs</span><span class="tag-value">2 simultaneously active</span></div>
+    <div class="tag-row"><span class="tag-label">New wave trigger</span><span class="tag-value">All orbs of current wave neutralised or Heart Stone hit</span></div>
+    <div class="tag-row"><span class="tag-label">Orbs per wave</span><span class="tag-value">+1 per wave, capped at 20</span></div>
+    <div class="tag-row"><span class="tag-label">Orb speed</span><span class="tag-value">+0.03 m/s per wave, capped at 0.7 m/s</span></div>
+    <div class="tag-row"><span class="tag-label">Spawn interval</span><span class="tag-value">−0.2 s per wave, floor at 0.5 s between spawns</span></div>
+  </div>
+
+  <h3>Collision Pairs — Narrowphase</h3>
+  <div class="grid-2">
+    <div class="block" style="border-left-color:var(--secondary)">
+      <div class="block-title" style="color:var(--secondary)">Orb ↔ Palm</div>
+      <p style="font-size:0.84rem;color:var(--muted);margin:0">Sphere–sphere test each frame. CATCH event fires when: <br/>① <code>dist(orb, palmCenter) &lt; orb.radius + palm.radius</code> <br/>② <code>dot(palmNormal, toOrb) &gt; 0.5</code> (palm is facing the orb) <br/>③ <code>isOpenPalm(hand) === true</code></p>
+    </div>
+    <div class="block" style="border-left-color:var(--accent)">
+      <div class="block-title" style="color:var(--accent)">Orb ↔ Heart Stone</div>
+      <p style="font-size:0.84rem;color:var(--muted);margin:0">Heart Stone collider radius = 0.15 m. On contact: deal −10 HP damage, destroy the orb with a burst particle effect, play the distorted crack SFX scaled by current HP.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--primary)">
+      <div class="block-title" style="color:var(--primary)">Orb ↔ Shield Spell</div>
+      <p style="font-size:0.84rem;color:var(--muted);margin:0">Sphere–sphere against shield sphere. On contact: decrement shield HP, compute reflection vector (<code>v − 2·dot(v,n)·n</code>), apply to orb velocity with 0.6× restitution.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--gold)">
+      <div class="block-title" style="color:var(--gold)">Orb ↔ Repulse Wave</div>
+      <p style="font-size:0.84rem;color:var(--muted);margin:0">Each frame: if <code>dist(orb, waveOrigin) &lt; currentWaveRadius</code>, apply outward impulse: <code>force = (waveRadius − dist) × 8</code> along normalised outward vector.</p>
+    </div>
+  </div>
+
+  <h3>Spatial Hashing Broadphase</h3>
+<pre>// CollisionManager.ts — cell size = 2× largest collider diameter
+const CELL_SIZE = 0.15; // 15 cm grid cells
+
+function worldToCell(p: THREE.Vector3): string {
+  const cx = Math.floor(p.x / CELL_SIZE);
+  const cy = Math.floor(p.y / CELL_SIZE);
+  const cz = Math.floor(p.z / CELL_SIZE);
+  return `${cx},${cy},${cz}`;
+}
+
+// Entities register themselves into grid each frame.
+// Only pairs sharing a cell proceed to narrowphase sphere–sphere test.
+// Reduces O(n²) comparisons to O(n · k) where k = average cell occupancy ≈ 1.2</pre>
+
+  <h3>Heart Stone Health System</h3>
+<pre>// HeartStone.ts
+class HeartStone {
+  hp    = 100;
+  readonly MAX_HP = 100;
+
+  takeDamage(amount: number) {
+    this.hp = Math.max(0, this.hp - amount);
+    this.updateRingVisual(this.hp / this.MAX_HP);
+    if (this.hp === 0) EventBus.emit("heartstone:depleted");
+  }
+
+  // 24 point-light orbs orbit the Heart Stone base in a horizontal ring.
+  // Active count = Math.floor(24 × healthFraction)
+  // At HP > 50%: warm gold colour, gentle pulse
+  // At HP 25–50%: amber colour, faster pulse (1.5× rate)
+  // At HP < 25%: deep red, erratic strobe pattern
+  updateRingVisual(frac: number) { /* see HeartStone.ts full implementation */ }
+}</pre>
+</section>
+
+<!-- ───────────────────────── SECTION: UI ───────────────────────── -->
+<section id="ui" class="section">
+  <div class="section-header"><span class="sec-icon">◉</span><h1>Diegetic UI</h1></div>
+  <div class="section-divider"></div>
+
+  <p><strong style="color:var(--gold)">Zero traditional HUD.</strong> All player information is embedded in the 3D game world. A floating health bar or screen-space score counter would destroy XR immersion. Every piece of feedback is narratively justified as part of the Echo Weaver's magical ability to perceive energy.</p>
+
+  <div class="grid-2">
+    <div class="block" style="border-left-color:var(--gold)">
+      <div class="block-title" style="color:var(--gold)">Score Bracelet</div>
+      <p style="font-size:0.85rem">A glowing ethereal bracelet on the player's dominant wrist. Orbiting rune-glyphs represent score tier — one glyph materialises per 10 points. The bracelet pulses softly on each successful catch or spell cast.</p>
+      <div class="tag-row"><span class="tag-label">Attached to</span><span class="tag-value">wrist joint transform (parented in Three.js)</span></div>
+      <div class="tag-row"><span class="tag-label">Visibility rule</span><span class="tag-value">Only rendered when player looks at own wrist (dot product check against camera forward)</span></div>
+    </div>
+    <div class="block" style="border-left-color:var(--accent)">
+      <div class="block-title" style="color:var(--accent)">Heart Stone Health Ring</div>
+      <p style="font-size:0.85rem">24 small light-orbs orbit the Heart Stone's base in a horizontal ring. Each represents ~4 HP. On damage, orbs extinguish from a random offset position — damage feels <em>"eaten"</em> rather than a simple left-to-right drain.</p>
+      <div class="tag-row"><span class="tag-label">Full HP</span><span class="tag-value" style="color:var(--gold)">Warm gold, slow gentle pulse</span></div>
+      <div class="tag-row"><span class="tag-label">Below 50%</span><span class="tag-value">Amber, 1.5× pulse rate</span></div>
+      <div class="tag-row"><span class="tag-label">Below 25%</span><span class="tag-value" style="color:var(--accent)">Deep red, erratic strobe</span></div>
+    </div>
+    <div class="block" style="border-left-color:var(--secondary)">
+      <div class="block-title" style="color:var(--secondary)">Palm Catch-Zone Guide</div>
+      <p style="font-size:0.85rem">When a hand is open and empty, faint geometric lines radiate from the palm center like a targeting reticule. Opacity scales with proximity to the nearest orb — invisible at distance, bright cyan when an orb is within catch range.</p>
+      <div class="tag-row"><span class="tag-label">Rendered as</span><span class="tag-value"><code>THREE.LineSegments</code> in world space, parented to palm center</span></div>
+      <div class="tag-row"><span class="tag-label">Hidden when</span><span class="tag-value">Hand is closed or already holds an orb</span></div>
+    </div>
+    <div class="block" style="border-left-color:var(--primary)">
+      <div class="block-title" style="color:var(--primary)">Sigil Reminder Halo</div>
+      <p style="font-size:0.85rem">When holding an orb and extending the index finger into pointing pose, three ghost-sigils (○ — △) orbit the holding wrist in a slow 6 rpm rotation. They fade out after 4 s or as soon as tracing begins.</p>
+      <div class="tag-row"><span class="tag-label">Opacity</span><span class="tag-value">~8% — barely perceptible, purely a memory aid</span></div>
+      <div class="tag-row"><span class="tag-label">Purpose</span><span class="tag-value">Onboarding aid for new players; invisible to experienced ones</span></div>
+    </div>
+  </div>
+
+  <h3>Wave Announcement</h3>
+  <div class="block" style="border-left-color:var(--muted)">
+    <p style="margin:0;font-size:0.86rem">Wave numbers are never shown as text. Instead, the Heart Stone emits a sequence of pulse-rings of light that travel outward along the chamber floor — one ring per wave number. Wave 3 → 3 sequential rings pulse from the Heart Stone base to the chamber wall, then fade. This communicates escalation through the world's visual language without any UI overlay.</p>
+  </div>
+
+  <h3>Orb Instability Warning</h3>
+  <div class="block" style="border-left-color:var(--accent)">
+    <p style="margin:0;font-size:0.86rem">When a held orb approaches its 5 s instability limit, the orb itself communicates the danger: surface cracks appear at t=60% of limit, particle sparks increase in density and speed at t=80%, and a low crackling audio cue begins at t=70%. At t=100% the orb ejects from the hand with a small area-of-effect shockwave that nudges the player (no HP damage, but disrupts any sigil trace in progress).</p>
+  </div>
+</section>
+
+<!-- ───────────────────────── SECTION: AUDIO ───────────────────────── -->
+<section id="audio" class="section">
+  <div class="section-header"><span class="sec-icon">♪</span><h1>Audio Design</h1></div>
+  <div class="section-divider"></div>
+
+  <p>Audio is built on the <strong>Web Audio API</strong> with <code>Howler.js</code> managing asset loading, decoding, and playback. Spatial positioning uses <code>PannerNode</code> with the <code>HRTF</code> panning model for convincing 3D audio placement without a dedicated spatial audio library. Failure sounds are deliberately soft — never punishing or jarring.</p>
+
+  <h3>Layered Soundtrack Architecture</h3>
+  <div class="block" style="border-left-color:var(--primary)">
+    <div class="block-title" style="color:var(--primary)">Four Simultaneous Stems — Identical BPM · Shared Timeline</div>
+    <div class="stem-row"><span class="stem-lbl" style="color:var(--muted)">Layer 1 — Drone</span><span style="color:var(--muted)">Always active. Ambient pad texture. The silence baseline — always present but never intrusive.</span></div>
+    <div class="stem-row"><span class="stem-lbl" style="color:var(--secondary)">Layer 2 — Rhythm</span><span style="color:var(--muted)">Fades in at wave 2. Subtle, irregular percussion. Signals that threats are building.</span></div>
+    <div class="stem-row"><span class="stem-lbl" style="color:var(--primary)">Layer 3 — Melody</span><span style="color:var(--muted)">Fades in when ≥4 orbs are simultaneously active. Urgent, ascending melodic line.</span></div>
+    <div class="stem-row" style="border-bottom:none"><span class="stem-lbl" style="color:var(--accent)">Layer 4 — Tension</span><span style="color:var(--muted)">Fades in when Heart Stone HP falls below 50%. Dissonant, frantic counter-melody.</span></div>
+  </div>
+  <p style="font-size:0.84rem;color:var(--muted)">All four stems are composed as 8-bar loops at a shared BPM and loaded pre-decoded into <code>AudioBuffer</code> objects. The shared <code>AudioContext.currentTime</code> timeline is established at session start; each layer is scheduled to its buffer offset to guarantee perfect alignment across all active stems regardless of when they're faded in.</p>
+
+  <h3>Spatial SFX Catalogue</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
+    <div class="sfx-card"><div class="sfx-event">Orb spawn</div><div class="sfx-desc">Distant crystalline ping. Positioned: spawn point.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Orb hum (looping)</div><div class="sfx-desc">Low ominous drone. 3D-positioned at orb center; updates every frame.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Orb caught</div><div class="sfx-desc">Satisfying deep whomp with rising pitch tail. Positioned: palm.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Orb destabilising</div><div class="sfx-desc">Crackling static that increases in density and pitch.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Orb ejected (instability)</div><div class="sfx-desc">Sharp crack + low shockwave thud. Short area reverb.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Shield cast</div><div class="sfx-desc">Deep resonant bell tone. Positioned: dome center.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Shield impact</div><div class="sfx-desc">Glass-ring harmonic; pitch descends per subsequent hit.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Shield shatter</div><div class="sfx-desc">Explosive crystalline burst. Long reverb tail.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Beam cast</div><div class="sfx-desc">Sharp electric whip-crack with tight stereo spread.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Repulse cast</div><div class="sfx-desc">Sub-bass thump + wind rush. Felt in the chest.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Heart Stone hit</div><div class="sfx-desc">Sickening crack; increasingly distorted at low HP.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Sigil recognised</div><div class="sfx-desc">Bright affirming chime. Positioned: tracing hand.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Sigil fail</div><div class="sfx-desc">Soft whoosh fade — never a harsh error buzz.</div></div>
+    <div class="sfx-card"><div class="sfx-event">Game over</div><div class="sfx-desc">Low, slow Heart Stone detonation. Music ducks to drone only.</div></div>
+  </div>
+</section>
+
+<!-- ───────────────────────── SECTION: ART ───────────────────────── -->
+<section id="art" class="section">
+  <div class="section-header"><span class="sec-icon">✧</span><h1>Art Direction</h1></div>
+  <div class="section-divider"></div>
+
+  <p>Echo Weaver's aesthetic identity is <strong style="color:var(--secondary)">Void Crystalline</strong>: geometric, luminous, and ancient. Low polygon counts are a deliberate design choice — shapes feel sacred and hand-carved from condensed light rather than manufactured. The dark environment exists purely as a stage that amplifies the luminous hands, orbs, and Heart Stone as the only actors.</p>
+
+  <h3>Colour Palette</h3>
+  <div class="swatch-wrap">
+    <div class="swatch"><div class="swatch-box" style="background:#07071a;border:2px solid #333"></div><div class="swatch-name">Void Black</div><code class="swatch-hex">#07071a</code><div class="swatch-role">Chamber walls, background</div></div>
+    <div class="swatch"><div class="swatch-box" style="background:#0d0d26"></div><div class="swatch-name">Deep Indigo</div><code class="swatch-hex">#0d0d26</code><div class="swatch-role">Ground plane, shadows</div></div>
+    <div class="swatch"><div class="swatch-box" style="background:#00e5ff"></div><div class="swatch-name">Crystal Blue</div><code class="swatch-hex">#00e5ff</code><div class="swatch-role">Player hands, UI guides</div></div>
+    <div class="swatch"><div class="swatch-box" style="background:#7c4dff"></div><div class="swatch-name">Arcane Violet</div><code class="swatch-hex">#7c4dff</code><div class="swatch-role">Shield spell, accents</div></div>
+    <div class="swatch"><div class="swatch-box" style="background:#ff4081"></div><div class="swatch-name">Corrupt Red</div><code class="swatch-hex">#ff4081</code><div class="swatch-role">Enemy orbs, damage</div></div>
+    <div class="swatch"><div class="swatch-box" style="background:#ffd740"></div><div class="swatch-name">Solar Gold</div><code class="swatch-hex">#ffd740</code><div class="swatch-role">Heart Stone, score UI</div></div>
+    <div class="swatch"><div class="swatch-box" style="background:#69f0ae"></div><div class="swatch-name">Verdant Green</div><code class="swatch-hex">#69f0ae</code><div class="swatch-role">Success FX, caught orb</div></div>
+  </div>
+
+  <h3>Ghost Hand Shader</h3>
+  <div class="block" style="border-left-color:var(--secondary)">
+    <div class="block-title" style="color:var(--secondary)">Fresnel Rim + Orb Proximity Tint</div>
+<pre>// GhostHand.frag (simplified GLSL)
+uniform float orbProximity; // 0.0 = far away, 1.0 = touching palm
+varying vec3  vNormal;
+varying vec3  vViewDir;
+
+void main() {
+  // Fresnel: bright rim at silhouette edges, transparent at centre
+  float fresnel  = pow(1.0 - clamp(dot(vNormal, vViewDir), 0.0, 1.0), 2.5);
+
+  // Base colour shifts from cool blue → cyan as orb approaches
+  vec3 baseColor = mix(vec3(0.20, 0.50, 1.0), vec3(0.0, 0.9, 1.0), orbProximity);
+
+  // Overall alpha: semi-transparent, more visible at rim
+  float alpha    = fresnel * 0.70 + 0.05;
+
+  gl_FragColor   = vec4(baseColor * (1.0 + orbProximity * 0.5), alpha);
+}</pre>
+    <p style="font-size:0.84rem;color:var(--muted);margin:0">When holding an orb, the orb's colour additively tints the entire hand. Fingertips emit a persistent <code>THREE.PointLight</code> (intensity 0.4) that ramps to 1.0 during active sigil tracing — the hand literally <em>glows</em> as the player casts.</p>
+  </div>
+
+  <h3>Orb Visual States</h3>
+  <div class="grid-3">
+    <div class="block" style="border-left-color:var(--accent)">
+      <div class="block-title" style="color:var(--accent)">Free (Homing)</div>
+      <p style="font-size:0.83rem;color:var(--muted);margin:0">Jagged, semi-faceted geometry. Corrupt red emissive. Faint particle trail. Gentle rotation jitter.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--success)">
+      <div class="block-title" style="color:var(--success)">Captured</div>
+      <p style="font-size:0.83rem;color:var(--muted);margin:0">Geometry smooths slightly. Transitions to verdant green. Gentle breathing pulse on scale.</p>
+    </div>
+    <div class="block" style="border-left-color:var(--gold)">
+      <div class="block-title" style="color:var(--gold)">Destabilising</div>
+      <p style="font-size:0.83rem;color:var(--muted);margin:0">Surface cracks appear via texture. Colour shifts gold → red. Spark particles increase. Scale jitter.</p>
+    </div>
+  </div>
+
+  <h3>Environment Geometry Spec</h3>
+  <div class="block" style="border-left-color:var(--muted)">
+    <div class="tag-row"><span class="tag-label">Chamber shape</span><span class="tag-value">Circular, 6 m radius, 5 m ceiling height</span></div>
+    <div class="tag-row"><span class="tag-label">Perimeter pillars</span><span class="tag-value">12 irregular crystal monoliths, 3–5 m tall, ~32-face low poly</span></div>
+    <div class="tag-row"><span class="tag-label">Floor</span><span class="tag-value">Concentric groove rings with 5% emissive glow (deep violet)</span></div>
+    <div class="tag-row"><span class="tag-label">Ceiling</span><span class="tag-value">Featureless black — infinite void feeling above the player</span></div>
+    <div class="tag-row"><span class="tag-label">Spawn positions</span><span class="tag-value">12 points at pillar bases; orbs arc upward 1.5 m before homing</span></div>
+    <div class="tag-row"><span class="tag-label">Heart Stone</span><span class="tag-value">Floats at 1.1 m height at chamber centre, rotates at 3 rpm. ~200 poly faceted crystal form with animated internal glow.</span></div>
+    <div class="tag-row"><span class="tag-label">Lighting</span><span class="tag-value">No ambient light. Heart Stone = primary warm point light (4 m radius). Each active orb = secondary red point light (1.5 m radius). Player fingertips = small fill lights.</span></div>
+  </div>
+</section>
+
+<!-- ───────────────────────── SECTION: MILESTONES ───────────────────────── -->
+<section id="milestones" class="section">
+  <div class="section-header"><span class="sec-icon">▸</span><h1>Milestones</h1></div>
+  <div class="section-divider"></div>
+
+  <p>Six two-week milestones. Each milestone must be <strong>independently playable and testable</strong> — this enables early user feedback and prevents late-stage integration failures common in XR projects.</p>
+
+  <div class="grid-2" style="margin-bottom:1.5rem">
+
+    <div class="block" style="border-left-color:var(--secondary)">
+      <div class="block-title" style="color:var(--secondary)">M1 — Foundation</div>
+      <div style="font-size:0.75rem;color:var(--secondary);margin-bottom:0.75rem;font-style:italic">Weeks 1–2</div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--secondary)">▸</span><span>Three.js + WebXR session init on Quest 2 (local HTTPS via Vite)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--secondary)">▸</span><span>Hand joint data reading + debug sphere visualisation per joint</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--secondary)">▸</span><span>Chamber geometry, Heart Stone mesh, basic lighting setup</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--secondary)">▸</span><span>Orb spawning + linear (non-homing) movement toward Heart Stone</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--secondary)">▸</span><span>Palm normal derivation + open-palm detection (no collision yet)</span></div>
+    </div>
+
+    <div class="block" style="border-left-color:var(--primary)">
+      <div class="block-title" style="color:var(--primary)">M2 — Core Interaction</div>
+      <div style="font-size:0.75rem;color:var(--primary);margin-bottom:0.75rem;font-style:italic">Weeks 3–4</div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--primary)">▸</span><span>Orb ↔ palm collision → catch event → orb parents to hand transform</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--primary)">▸</span><span>Orb ↔ Heart Stone collision → damage, game-over state</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--primary)">▸</span><span>PathSampler: index-finger trail recording at 20 Hz</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--primary)">▸</span><span>Sigil trail visual (ephemeral LineSegments with fade)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--primary)">▸</span><span>$1 Recognizer: Circle recognition only → Shield spell prototype</span></div>
+    </div>
+
+    <div class="block" style="border-left-color:var(--gold)">
+      <div class="block-title" style="color:var(--gold)">M3 — Full Spellbook</div>
+      <div style="font-size:0.75rem;color:var(--gold);margin-bottom:0.75rem;font-style:italic">Weeks 5–6</div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--gold)">▸</span><span>Beam + Triangle templates, recognition tuning, confidence threshold calibration</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--gold)">▸</span><span>Beam spell: raycast, orb destruction, CylinderGeometry beam visual</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--gold)">▸</span><span>Repulse spell: expanding sphere collider + per-orb impulse system</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--gold)">▸</span><span>Haptic feedback wired to gesture recognition success</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--gold)">▸</span><span>Orb instability: hold timer, crack VFX, force-eject at limit</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--gold)">▸</span><span>Tracking-loss graceful degradation + orb hover system</span></div>
+    </div>
+
+    <div class="block" style="border-left-color:var(--success)">
+      <div class="block-title" style="color:var(--success)">M4 — Diegetic Systems</div>
+      <div style="font-size:0.75rem;color:var(--success);margin-bottom:0.75rem;font-style:italic">Weeks 7–8</div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--success)">▸</span><span>Wrist score bracelet with orbiting rune-glyphs</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--success)">▸</span><span>Heart Stone health ring (24 light-orbs, colour states)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--success)">▸</span><span>Palm catch-zone guide lines (proximity-driven opacity)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--success)">▸</span><span>Sigil reminder halo (orb held + pointing pose)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--success)">▸</span><span>Two-handed push gesture → emergency deflect</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--success)">▸</span><span>Two-handed zoom gesture → camera FOV scaling</span></div>
+    </div>
+
+    <div class="block" style="border-left-color:var(--accent)">
+      <div class="block-title" style="color:var(--accent)">M5 — Audio &amp; Polish</div>
+      <div style="font-size:0.75rem;color:var(--accent);margin-bottom:0.75rem;font-style:italic">Weeks 9–10</div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--accent)">▸</span><span>All spatial SFX events wired to gameplay actions</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--accent)">▸</span><span>Dynamic 4-layer music system with cross-fade transitions</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--accent)">▸</span><span>Wave progression + difficulty curve tuning via playtest data</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--accent)">▸</span><span>Ghost hand Fresnel shader + orb proximity glow</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--accent)">▸</span><span>Particle systems: all spell FX, orb destruction, capture burst</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--accent)">▸</span><span>Performance pass: 72 fps locked on Quest 2 hardware</span></div>
+    </div>
+
+    <div class="block" style="border-left-color:var(--muted)">
+      <div class="block-title" style="color:var(--muted)">M6 — QA &amp; Launch</div>
+      <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.75rem;font-style:italic">Weeks 11–12</div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--muted)">▸</span><span>10-user playtest: first-minute comprehension measurement (target ≥90%)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--muted)">▸</span><span>Gesture recognition accuracy audit (target ≥92% on valid traces)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--muted)">▸</span><span>False-positive rate audit (target &lt;2% per 100 idle frames)</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--muted)">▸</span><span>Accessibility pass: one-handed play fallback mode</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--muted)">▸</span><span>Cross-device: Quest 2, Quest 3, Apple Vision Pro</span></div>
+      <div class="task-item"><span class="task-arrow" style="color:var(--muted)">▸</span><span>Public WebXR deploy via Vercel + itch.io listing</span></div>
+    </div>
+
+  </div>
+
+  <div class="div"></div>
+  <h3>Success Criteria</h3>
+  <div class="grid-3">
+    <div class="kpi"><div class="kpi-val" style="color:var(--success)">≥ 90%</div><div class="kpi-lbl">First-minute mechanic comprehension (new users, no text tutorial)</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--success)">≥ 92%</div><div class="kpi-lbl">Gesture recognition accuracy on deliberately drawn sigils</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--success)">&lt; 2%</div><div class="kpi-lbl">False positive rate per 100 frames of idle hand movement</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--secondary)">72 fps</div><div class="kpi-lbl">Locked frame rate target on Meta Quest 2</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--secondary)">90 fps</div><div class="kpi-lbl">Locked frame rate target on Meta Quest 3</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--gold)">&lt; 3 MB</div><div class="kpi-lbl">Maximum gzipped bundle size including all assets</div></div>
+  </div>
+
+  <div class="div"></div>
+  <div class="block" style="border-left-color:var(--primary)">
+    <div class="block-title" style="color:var(--primary)">Definition of Done — Core Experience</div>
+    <p style="font-size:0.87rem;color:var(--muted);margin:0">A new user, given no verbal or textual instructions, can pick up an orb within 30 seconds, successfully cast at least one spell within 90 seconds, and — when asked afterward — describe the game's core mechanic as something that felt like <em>"actual magic"</em> rather than "gesture controls." The game must feel responsive, forgiving, and physically engaging. Every second of play should feel like a skill worth practising.</p>
+  </div>
+</section>
+
+</div><!-- .content-wrap -->
+</main>
+
+<script>
+  const btns = document.querySelectorAll('.nav-btn');
+  const sections = document.querySelectorAll('.section');
+
+  btns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.section;
+
+      btns.forEach(b => b.classList.remove('active'));
+      sections.forEach(s => s.classList.remove('active'));
+
+      btn.classList.add('active');
+      document.getElementById(id).classList.add('active');
+
+      // Scroll content to top on section change
+      document.getElementById('main').scrollTop = 0;
+    });
+  });
+</script>
 </body>
 </html>
