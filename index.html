@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo Weaver - Phase 3</title>
+    <title>Echo Weaver - Phase 4</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: monospace; }
         #info {
@@ -29,8 +29,8 @@
 </head>
 <body>
     <div id="info">
-        Echo Weaver: Phase 3<br/>Defend the Heart Stone. Spells: Line (Beam), Triangle (Repulse), Cross/X (Barrage).
-        <div id="stats">Power Level: 1 | Locks: 1 | Kills: 0</div>
+        Echo Weaver: Phase 4 (Soul Gauntlet)<br/>Absorb up to 3 Orbs. Spells consume all loaded Orbs to multiply power.
+        <div id="stats">Active Charge: 0 | Kills: 0</div>
     </div>
 
     <script type="module">
@@ -41,21 +41,21 @@
         let camera, scene, renderer;
         let heartStone, healthRing;
         let heartHealth = 100;
-        let orbs = []; // Ammunition
-        let enemies = []; // Hostiles
-        const hands = [null, null]; // Left, Right
+        let orbs = []; 
+        let enemies = []; 
+        const hands = [null, null]; 
         
         // --- Settings & Progression ---
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
         const PINCH_THRESH = 0.03;
-        const ENEMY_SPAWN_RATE = 3.0; // Seconds between enemy spawns
-        const ORB_SPAWN_RATE = 2.0;   // Seconds between ammo spawns
+        const ENEMY_SPAWN_RATE = 3.0; 
+        const ORB_SPAWN_RATE = 1.5;   // Faster ammo spawn for stacking
+        const MAX_HELD_ORBS = 3;      // Gauntlet capacity
         let enemySpawnTimer = 0;
         let orbSpawnTimer = 0;
 
         let enemiesKilled = 0;
-        let maxLocks = 1;
         let lockedEnemies = [];
         let lockReticles = [];
 
@@ -169,14 +169,11 @@
                 
                 // Line
                 addT('line', [new Point(0,0), new Point(100,0)]);
-                
                 // Triangle
                 addT('triangle', [new Point(50,10), new Point(10,90), new Point(90,90), new Point(50,10)]);
-
-                // Single-stroke Cross (Down, up-middle, left, right)
+                // Cross
                 addT('cross', [new Point(50,10), new Point(50,90), new Point(50,50), new Point(10,50), new Point(90,50)]);
-                
-                // Single-stroke X (Diagonal down-right, up, diagonal down-left)
+                // X
                 addT('x', [new Point(10,10), new Point(90,90), new Point(90,10), new Point(10,90)]);
             }
             Recognize(points) {
@@ -237,7 +234,7 @@
             const ringMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
             healthRing = new THREE.Mesh(ringGeo, ringMat);
             healthRing.rotation.x = Math.PI / 2;
-            heartStone.add(healthRing); // Child of Heart Stone
+            heartStone.add(healthRing); 
 
             // --- Trail Setup ---
             trailGeo = new THREE.BufferGeometry();
@@ -247,8 +244,8 @@
             trailLine = new THREE.Line(trailGeo, trailMat);
             scene.add(trailLine);
 
-            // --- Lock-on Reticles Pool ---
-            for (let i = 0; i < 4; i++) {
+            // --- Lock-on Reticles Pool (Max 3 for fully charged gauntlet) ---
+            for (let i = 0; i < MAX_HELD_ORBS; i++) {
                 const rGeo = new THREE.RingGeometry(0.18, 0.22, 16);
                 const rMat = new THREE.MeshBasicMaterial({color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.7});
                 const reticle = new THREE.Mesh(rGeo, rMat);
@@ -265,23 +262,21 @@
 
         function handleEnemyKill() {
             enemiesKilled++;
-            
-            // Progression logic
-            if (enemiesKilled >= 30) maxLocks = 4;
-            else if (enemiesKilled >= 15) maxLocks = 3;
-            else if (enemiesKilled >= 5) maxLocks = 2;
+            updateStatsUI();
+        }
 
-            document.getElementById('stats').innerText = `Power Level: ${maxLocks} | Locks: ${maxLocks} | Kills: ${enemiesKilled}`;
+        function updateStatsUI() {
+            const chargeL = hands[0]?.userData.heldOrbs.length || 0;
+            const chargeR = hands[1]?.userData.heldOrbs.length || 0;
+            const maxCharge = Math.max(chargeL, chargeR);
+            document.getElementById('stats').innerText = `Active Charge: ${maxCharge}/${MAX_HELD_ORBS} | Kills: ${enemiesKilled}`;
         }
 
         function damageHeartStone() {
             heartHealth -= 20;
-            
-            // Flash red
             heartStone.material.emissive.setHex(0xff0000);
             setTimeout(() => { heartStone.material.emissive.setHex(0x008888); }, 200);
 
-            // Update Ring
             const scale = Math.max(0.1, heartHealth / 100);
             healthRing.scale.set(scale, scale, scale);
 
@@ -293,54 +288,40 @@
                 // System reset
                 heartHealth = 100;
                 enemiesKilled = 0;
-                maxLocks = 1;
-                document.getElementById('stats').innerText = `Power Level: ${maxLocks} | Locks: ${maxLocks} | Kills: ${enemiesKilled}`;
+                updateStatsUI();
                 healthRing.scale.set(1, 1, 1);
                 healthRing.material.color.setHex(0x00ff00);
                 
-                // Wipe the board
                 orbs.forEach(orb => scene.remove(orb));
                 orbs = [];
                 enemies.forEach(enemy => scene.remove(enemy));
                 enemies = [];
+                hands.forEach(h => { if(h) h.userData.heldOrbs = []; });
             }
         }
 
         function createOrb(position) {
-            // Ammo - Harmless energy waiting to be grabbed
-            const colorHex = 0x00ffff;
+            // Ammo - Soul Blue
+            const colorHex = 0x00aaff;
             const geo = new THREE.SphereGeometry(0.06, 16, 16);
             const mat = new THREE.MeshStandardMaterial({
                 color: colorHex, emissive: colorHex, emissiveIntensity: 0.8, roughness: 0.2, metalness: 0.8
             });
             const orb = new THREE.Mesh(geo, mat);
             orb.position.copy(position);
-            
-            orb.userData = { 
-                baseY: position.y, 
-                phase: Math.random() * Math.PI * 2, 
-                heldBy: null
-            };
-            
+            orb.userData = { baseY: position.y, phase: Math.random() * Math.PI * 2, heldBy: null, state: 'idle' };
             scene.add(orb);
             orbs.push(orb);
         }
 
         function createEnemy(position) {
-            // Hostiles - Jagged and red, moving to destroy the artifact
             const geo = new THREE.IcosahedronGeometry(0.12, 0);
             const mat = new THREE.MeshStandardMaterial({
                 color: 0xff0000, emissive: 0xaa0000, emissiveIntensity: 0.4, roughness: 0.6, flatShading: true
             });
             const enemy = new THREE.Mesh(geo, mat);
             enemy.position.copy(position);
-            
-            enemy.userData = { 
-                phase: Math.random() * Math.PI * 2, 
-                state: 'homing', 
-                velocity: new THREE.Vector3()
-            };
-            
+            enemy.userData = { phase: Math.random() * Math.PI * 2, state: 'homing', velocity: new THREE.Vector3() };
             scene.add(enemy);
             enemies.push(enemy);
         }
@@ -350,8 +331,17 @@
             scene.add(hand);
 
             hand.userData.jointMeshes = {};
-            hand.userData.isHolding = false;
+            hand.userData.heldOrbs = []; // Array to stack energy
             hand.userData.handedness = index === 0 ? 'left' : 'right';
+
+            // Add Diegetic Gauntlet Visual
+            const gauntletGeo = new THREE.CylinderGeometry(0.04, 0.045, 0.12, 8);
+            gauntletGeo.rotateX(Math.PI / 2); // Align with forearm
+            const gauntletMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.3 });
+            const gauntlet = new THREE.Mesh(gauntletGeo, gauntletMat);
+            gauntlet.visible = false; // Hidden until tracking connects
+            scene.add(gauntlet);
+            hand.userData.gauntletMesh = gauntlet;
 
             hand.addEventListener('connected', (event) => { hand.userData.xrInputSource = event.data; });
             hands[index] = hand;
@@ -374,64 +364,58 @@
 
         function isHandOpen(hand) {
             if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
-            const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist > 0.10; 
+            return hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position) > 0.10; 
         }
 
         function isHandClosed(hand) {
             if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
-            const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist < 0.07; 
+            return hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position) < 0.07; 
         }
 
         function isPinching(hand) {
             if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['index-finger-tip']) return false;
-            const dist = hand.joints['thumb-tip'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist < PINCH_THRESH; 
+            return hand.joints['thumb-tip'].position.distanceTo(hand.joints['index-finger-tip'].position) < PINCH_THRESH; 
         }
 
         function updateTargeting() {
             lockedEnemies = [];
-            const isHolding = hands[0]?.userData.isHolding || hands[1]?.userData.isHolding;
+            const chargeL = hands[0]?.userData.heldOrbs.length || 0;
+            const chargeR = hands[1]?.userData.heldOrbs.length || 0;
+            const currentCharge = Math.max(chargeL, chargeR);
 
-            if (isHolding && enemies.length > 0) {
+            if (currentCharge > 0 && enemies.length > 0) {
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 const candidates = [];
 
                 enemies.forEach(enemy => {
                     const dirToEnemy = new THREE.Vector3().subVectors(enemy.position, camera.position).normalize();
                     const dot = forward.dot(dirToEnemy);
-                    // Roughly a 60 degree cone in front of player
-                    if (dot > 0.5) { 
-                        candidates.push({ enemy, dot });
-                    }
+                    if (dot > 0.5) candidates.push({ enemy, dot }); // ~60 degree cone
                 });
 
-                // Sort by how centered they are on screen
                 candidates.sort((a, b) => b.dot - a.dot);
 
-                for (let i = 0; i < Math.min(maxLocks, candidates.length); i++) {
+                for (let i = 0; i < Math.min(currentCharge, candidates.length); i++) {
                     lockedEnemies.push(candidates[i].enemy);
                 }
             }
 
-            // Paint the reticles
             for (let i = 0; i < lockReticles.length; i++) {
                 if (i < lockedEnemies.length) {
                     lockReticles[i].visible = true;
                     lockReticles[i].position.copy(lockedEnemies[i].position);
                     lockReticles[i].lookAt(camera.position);
-                    lockReticles[i].rotation.z += 0.05; // Spin animation
+                    lockReticles[i].rotation.z += 0.05; 
                 } else {
                     lockReticles[i].visible = false;
                 }
             }
         }
 
-        function fireSpell(type, origin) {
+        function fireSpell(type, origin, powerLevel) {
             if (type === 'line') {
                 if (lockedEnemies.length > 0) {
-                    // SMART MUNITIONS: Fire auto-homing beams at all locked targets
+                    // SMART MUNITIONS: Fire beams at all locked targets (up to powerLevel)
                     lockedEnemies.forEach(targetEnemy => {
                         const start = origin.clone();
                         const end = targetEnemy.position.clone();
@@ -439,32 +423,29 @@
                         const mid = start.clone().lerp(end, 0.5);
 
                         const geo = new THREE.CylinderGeometry(0.015, 0.015, distance);
-                        geo.rotateX(Math.PI / 2); // Align cylinder to Z axis for lookAt
-                        const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.9});
+                        geo.rotateX(Math.PI / 2); 
+                        const mat = new THREE.MeshBasicMaterial({color: 0x00aaff, transparent: true, opacity: 0.9});
                         const mesh = new THREE.Mesh(geo, mat);
                         
                         mesh.position.copy(mid);
-                        mesh.lookAt(end); // Point directly at target
+                        mesh.lookAt(end); 
                         scene.add(mesh);
 
-                        // Destroy target
                         const index = enemies.indexOf(targetEnemy);
                         if(index > -1) {
                             scene.remove(targetEnemy);
                             enemies.splice(index, 1);
                             handleEnemyKill();
                         }
-
                         setTimeout(() => scene.remove(mesh), 200);
                     });
                 } else {
-                    // DUMB FIRE FALLBACK: Raycast forward from camera direction
+                    // DUMB FIRE FALLBACK
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-                    
-                    const geo = new THREE.CylinderGeometry(0.01, 0.01, 10);
+                    const geo = new THREE.CylinderGeometry(0.01 * powerLevel, 0.01 * powerLevel, 10);
                     geo.translate(0, 5, 0); 
                     geo.rotateX(-Math.PI / 2); 
-                    const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8});
+                    const mat = new THREE.MeshBasicMaterial({color: 0x00aaff, transparent: true, opacity: 0.8});
                     const mesh = new THREE.Mesh(geo, mat);
                     mesh.position.copy(origin);
                     mesh.quaternion.copy(camera.quaternion); 
@@ -486,11 +467,10 @@
                 }
 
             } else if (type === 'triangle') {
-                // KINETIC REPULSE: Massively Buffed to launch enemies away
-                const REPULSE_RADIUS = 5.0; // Increased radius
-                const PUSH_FORCE = 15.0; // Massive outward force
+                // KINETIC REPULSE: Scales intensely with absorbed energy
+                const REPULSE_RADIUS = 3.0 + (powerLevel * 1.5); 
+                const PUSH_FORCE = 8.0 * powerLevel; 
                 
-                // Visual Effect
                 const geo = new THREE.IcosahedronGeometry(0.1, 1);
                 const mat = new THREE.MeshBasicMaterial({color: 0xffaa00, wireframe: true, transparent: true, opacity: 0.8});
                 const mesh = new THREE.Mesh(geo, mat);
@@ -498,12 +478,11 @@
                 scene.add(mesh);
                 
                 const expInt = setInterval(() => {
-                    mesh.scale.multiplyScalar(1.3);
+                    mesh.scale.multiplyScalar(1.3 + (powerLevel * 0.1));
                     mat.opacity -= 0.08;
                     if(mat.opacity <= 0) { clearInterval(expInt); scene.remove(mesh); }
                 }, 30);
 
-                // Collision Logic against Enemies
                 enemies.forEach(enemy => {
                     if (enemy.position.distanceTo(origin) < REPULSE_RADIUS) {
                         enemy.userData.state = 'repulsed';
@@ -512,8 +491,8 @@
                     }
                 });
             } else if (type === 'cross' || type === 'x') {
-                // CROSS BARRAGE: Fires 4 diverging beams in an X pattern relative to the camera
-                const divergence = Math.PI / 10; // Angle of spread
+                // CROSS BARRAGE: Thicker beams, longer duration based on power
+                const divergence = Math.PI / 10; 
                 const angles = [
                     new THREE.Euler(divergence, divergence, 0),
                     new THREE.Euler(divergence, -divergence, 0),
@@ -525,8 +504,8 @@
                     const directionQuat = camera.quaternion.clone().multiply(new THREE.Quaternion().setFromEuler(euler));
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(directionQuat).normalize();
                     
-                    // Visual Effect
-                    const geo = new THREE.CylinderGeometry(0.015, 0.015, 10);
+                    const beamThickness = 0.01 * powerLevel;
+                    const geo = new THREE.CylinderGeometry(beamThickness, beamThickness, 10);
                     geo.translate(0, 5, 0); 
                     geo.rotateX(-Math.PI / 2); 
                     const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.8});
@@ -535,7 +514,6 @@
                     mesh.quaternion.copy(directionQuat);
                     scene.add(mesh);
                     
-                    // Collision Logic against Enemies
                     const raycaster = new THREE.Raycaster(origin, forward);
                     const intersects = raycaster.intersectObjects(enemies);
                     
@@ -548,7 +526,7 @@
                             handleEnemyKill();
                         }
                     }
-                    setTimeout(() => scene.remove(mesh), 300);
+                    setTimeout(() => scene.remove(mesh), 200 + (powerLevel * 100)); // Lasts longer
                 });
             }
         }
@@ -564,20 +542,25 @@
             const result = recognizer.Recognize(points2D);
             console.log("Casted: ", result.Name, "Score: ", result.Score);
 
-            // Treat 'x' and 'cross' as the same weapon trigger
             const finalSpell = (result.Name === 'x') ? 'cross' : result.Name;
 
-            if (result.Name !== 'none') {
-                const heldOrbIndex = orbs.findIndex(o => o.userData.heldBy === activeCastingHand);
-                if (heldOrbIndex > -1) {
-                    const origin = orbs[heldOrbIndex].position.clone();
-                    scene.remove(orbs[heldOrbIndex]);
-                    orbs.splice(heldOrbIndex, 1);
+            if (finalSpell !== 'none') {
+                const activeHand = hands[activeCastingHand === 'left' ? 0 : 1];
+                
+                if (activeHand && activeHand.userData.heldOrbs.length > 0) {
+                    const origin = activeHand.joints['wrist'].position.clone();
+                    const powerLevel = activeHand.userData.heldOrbs.length;
                     
-                    fireSpell(finalSpell, origin);
+                    // Consume all stored energy
+                    activeHand.userData.heldOrbs.forEach(orb => {
+                        scene.remove(orb);
+                        const index = orbs.indexOf(orb);
+                        if(index > -1) orbs.splice(index, 1);
+                    });
+                    activeHand.userData.heldOrbs = [];
+                    updateStatsUI();
                     
-                    const handIdx = activeCastingHand === 'left' ? 0 : 1;
-                    hands[handIdx].userData.isHolding = false;
+                    fireSpell(finalSpell, origin, powerLevel);
                 }
             }
         }
@@ -588,6 +571,15 @@
 
                 const wristSpace = hand.joints['wrist'];
                 if (!wristSpace || !wristSpace.position) return; 
+
+                // Update Gauntlet Position
+                if (hand.userData.gauntletMesh) {
+                    hand.userData.gauntletMesh.visible = true;
+                    // Slightly offset gauntlet behind the wrist joint
+                    const offset = new THREE.Vector3(0, 0, 0.05).applyQuaternion(wristSpace.quaternion);
+                    hand.userData.gauntletMesh.position.copy(wristSpace.position).add(offset);
+                    hand.userData.gauntletMesh.quaternion.copy(wristSpace.quaternion);
+                }
 
                 Object.keys(hand.joints).forEach(jointName => {
                     const joint = hand.joints[jointName];
@@ -613,30 +605,36 @@
                 const pinching = isPinching(hand);
                 const wristPos = hand.joints['wrist'].position;
 
-                if (hand.userData.isHolding && isClosed && !isDrawing) {
-                    orbs.forEach(orb => {
-                        if (orb.userData.heldBy === hand.userData.handedness) {
-                            orb.userData.heldBy = null; 
-                            orb.userData.baseY = orb.position.y; // Drops back to idle hover
-                        }
+                // Vent Energy (Drop)
+                if (hand.userData.heldOrbs.length > 0 && isClosed && !isDrawing) {
+                    hand.userData.heldOrbs.forEach(orb => {
+                        orb.userData.heldBy = null; 
+                        orb.userData.state = 'idle';
+                        orb.userData.baseY = orb.position.y;
+                        orb.scale.set(1, 1, 1); // Restore size
                     });
-                    hand.userData.isHolding = false;
+                    hand.userData.heldOrbs = [];
+                    updateStatsUI();
                 }
 
-                if (!hand.userData.isHolding && isOp) {
+                // Absorb Energy
+                if (hand.userData.heldOrbs.length < MAX_HELD_ORBS && isOp) {
                     for (let i = 0; i < orbs.length; i++) {
                         const orb = orbs[i];
-                        if (orb.userData.heldBy !== null) continue; // Skip if held
+                        if (orb.userData.state === 'held') continue; 
                         
                         if (wristPos.distanceTo(orb.position) < CATCH_RADIUS) {
                             orb.userData.heldBy = hand.userData.handedness;
-                            hand.userData.isHolding = true;
-                            break; 
+                            orb.userData.state = 'held';
+                            hand.userData.heldOrbs.push(orb);
+                            updateStatsUI();
+                            break; // Absorb one per frame to prevent instant stacking visual glitches
                         }
                     }
                 }
 
-                if (hand.userData.isHolding) {
+                // Drawing logic
+                if (hand.userData.heldOrbs.length > 0) {
                     if (pinching) {
                         if (!isDrawing) {
                             isDrawing = true;
@@ -670,28 +668,21 @@
         }
 
         function updateEntities(timeDelta, timeSeconds) {
-            // Spawn Enemy Logic (180 degrees in front of the player)
             enemySpawnTimer -= timeDelta;
             if (enemySpawnTimer <= 0) {
                 enemySpawnTimer = ENEMY_SPAWN_RATE;
-                // An angle between PI and 2*PI ensures they only spawn on the far side 
-                // of the Heart Stone, never behind you.
                 const angle = Math.PI + (Math.random() * Math.PI); 
-                const radius = 5; // Spawn 5 meters out
+                const radius = 5; 
                 const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
                 createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius));
             }
 
-            // Spawn Ammo Logic (Tightly clustered in front of player)
             orbSpawnTimer -= timeDelta;
-            if (orbSpawnTimer <= 0 && orbs.length < 5) {
+            if (orbSpawnTimer <= 0 && orbs.length < 8) { // Allow more floating ammo
                 orbSpawnTimer = ORB_SPAWN_RATE;
-                // Spawning biased forward
                 const angle = Math.PI + (Math.random() * Math.PI); 
-                const radius = 0.3 + Math.random() * 0.2; // 0.3m to 0.5m right in front of you
-                const yPos = 1.0 + Math.random() * 0.4; // Waist/Chest height
-                
-                // Position relative to the camera to ensure they are easily reachable
+                const radius = 0.3 + Math.random() * 0.2; 
+                const yPos = 1.0 + Math.random() * 0.4; 
                 createOrb(new THREE.Vector3(
                     camera.position.x + Math.cos(angle) * radius, 
                     yPos, 
@@ -701,44 +692,56 @@
 
             const heartPos = heartStone.position;
 
-            // Process Hostiles
             for (let i = enemies.length - 1; i >= 0; i--) {
                 let enemy = enemies[i];
 
                 if (enemy.userData.state === 'homing') {
-                    // Move relentlessly toward Heart Stone
                     const moveDir = new THREE.Vector3().subVectors(heartPos, enemy.position).normalize();
                     const SPEED = 0.5; 
                     enemy.position.add(moveDir.multiplyScalar(SPEED * timeDelta));
                     enemy.position.y += Math.sin(timeSeconds * 4 + enemy.userData.phase) * 0.003;
                     
-                    // Rotate for jagged effect
                     enemy.rotation.x += 0.02;
                     enemy.rotation.y += 0.03;
 
-                    // Collision with Heart Stone
                     if (enemy.position.distanceTo(heartPos) < 0.4) {
                         damageHeartStone();
                         scene.remove(enemy);
                         enemies.splice(i, 1);
                     }
                 } else if (enemy.userData.state === 'repulsed') {
-                    // Apply heavy physics velocity
                     enemy.position.add(enemy.userData.velocity.clone().multiplyScalar(timeDelta));
-                    enemy.userData.velocity.multiplyScalar(0.92); // Friction
+                    enemy.userData.velocity.multiplyScalar(0.92); 
                     if (enemy.userData.velocity.length() < 0.2) {
                         enemy.userData.state = 'homing';
                     }
                 }
             }
 
-            // Process Ammo Orbs
+            // Process Orbs
             orbs.forEach(orb => {
-                if (orb.userData.heldBy) {
+                if (orb.userData.state === 'held') {
                     const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
                     const hand = hands[handIndex];
                     if (hand && hand.joints && hand.joints['wrist']) {
-                        orb.position.lerp(hand.joints['wrist'].position, 0.2); 
+                        const wristPos = hand.joints['wrist'].position;
+                        const heldIndex = hand.userData.heldOrbs.indexOf(orb);
+                        const totalHeld = hand.userData.heldOrbs.length;
+                        
+                        // Calculate orbit position around the wrist
+                        const orbitRadius = 0.08;
+                        const angleOffset = (heldIndex / totalHeld) * Math.PI * 2 + (timeSeconds * 4);
+                        
+                        const targetPos = wristPos.clone();
+                        // Creating a local orbital plane relative to the camera for better visibility
+                        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+                        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+                        
+                        targetPos.add(right.multiplyScalar(Math.cos(angleOffset) * orbitRadius));
+                        targetPos.add(up.multiplyScalar(Math.sin(angleOffset) * orbitRadius));
+
+                        orb.scale.lerp(new THREE.Vector3(0.5, 0.5, 0.5), 0.2); // Shrink when absorbed
+                        orb.position.lerp(targetPos, 0.3); 
                     }
                 } else {
                     orb.position.y = orb.userData.baseY + Math.sin(timeSeconds * 2 + orb.userData.phase) * 0.05;
@@ -755,7 +758,7 @@
         let lastTime = 0;
         function animate(time, frame) {
             const timeSeconds = time * 0.001;
-            const timeDelta = Math.min(timeSeconds - lastTime, 0.1); // Cap delta to prevent huge jumps
+            const timeDelta = Math.min(timeSeconds - lastTime, 0.1); 
             lastTime = timeSeconds;
             
             heartStone.rotation.y += 0.01;
@@ -763,7 +766,7 @@
 
             if (renderer.xr.isPresenting) {
                 updateHands(timeDelta);
-                updateTargeting(); // Compute aim-assist logic
+                updateTargeting(); 
             }
 
             updateEntities(timeDelta, timeSeconds);
