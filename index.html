@@ -1,31 +1,175 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Quantum Resonance: Core VR Loop (Debug Mode)</title>
+    <title>Quantum Resonance: Floating Sector</title>
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
     
     <script>
-      // 1. PINCH DEBUGGER
-      AFRAME.registerComponent('pinch-debugger', {
-        init: function() {
-          this.indicator = document.createElement('a-entity');
-          this.indicator.setAttribute('geometry', 'primitive: sphere; radius: 0.06');
-          this.indicator.setAttribute('material', 'color: #ff0000; wireframe: true; opacity: 0.5; shader: flat');
-          this.el.appendChild(this.indicator);
+      // 1. THE SPATIAL TEAR SHADER (Restored the Void)
+      AFRAME.registerShader('rift-void', {
+        schema: {
+          timeMsec: {type: 'time', is: 'uniform'},
+          colorEdge: {type: 'color', is: 'uniform', default: '#00ffcc'}, 
+          colorVoid: {type: 'color', is: 'uniform', default: '#050505'}  
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float timeMsec;
+          uniform vec3 colorEdge;
+          uniform vec3 colorVoid;
+          varying vec2 vUv;
 
-          this.el.addEventListener('pinchstarted', () => {
-            this.indicator.setAttribute('material', 'color: #00ff00; wireframe: false; opacity: 1; shader: flat');
-            console.log(this.el.id + " PINCH INITIATED");
-          });
+          float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+          float noise(vec2 st) {
+              vec2 i = floor(st); vec2 f = fract(st);
+              float a = random(i); float b = random(i + vec2(1.0, 0.0));
+              float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
+              vec2 u = f * f * (3.0 - 2.0 * f);
+              return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+          }
+
+          void main() {
+            float time = timeMsec / 1000.0; 
+            vec2 p = vUv * 2.0 - 1.0;
+            float r = length(p); 
+            float a = atan(p.y, p.x); 
+
+            float swirl = a + time * 3.0 - r * 4.0;
+            float n = noise(vec2(cos(swirl), sin(swirl)) * 2.5 + time * 1.5);
+            float distortedRadius = r + n * 0.3;
+
+            float glowMask = smoothstep(0.5, 0.8, distortedRadius) * smoothstep(1.0, 0.8, distortedRadius);
+            vec3 finalColor = mix(colorVoid, colorEdge, glowMask * 2.5);
+            finalColor += colorEdge * noise(vec2(time * 20.0, a * 10.0)) * glowMask * 0.5;
+
+            float alpha = step(distortedRadius, 0.9);
+            gl_FragColor = vec4(finalColor, alpha);
+          }
+        `
+      });
+
+      // 2. FLOATING ENVIRONMENT GENERATOR (Translated to A-Frame ECS)
+      AFRAME.registerComponent('floating-level', {
+        init: function () {
+          const scene = this.el.sceneEl.object3D;
           
-          this.el.addEventListener('pinchended', () => {
-            this.indicator.setAttribute('material', 'color: #ff0000; wireframe: true; opacity: 0.5; shader: flat');
-            console.log(this.el.id + " PINCH RELEASED");
+          // Background and Fog
+          scene.background = new THREE.Color(0x111122);
+          scene.fog = new THREE.Fog(0x111122, 20, 60);
+
+          // Lighting Setup
+          const ambientLight = new THREE.AmbientLight(0x404060);
+          scene.add(ambientLight);
+
+          const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+          dirLight.position.set(5, 20, 10);
+          scene.add(dirLight);
+
+          const fillLight = new THREE.PointLight(0x4466ff, 0.5);
+          fillLight.position.set(-5, 0, 5);
+          scene.add(fillLight);
+
+          const backLight = new THREE.PointLight(0xffaa66, 0.3);
+          backLight.position.set(0, 5, -15);
+          scene.add(backLight);
+
+          // Starfield
+          const starsGeometry = new THREE.BufferGeometry();
+          const starsCount = 1000;
+          const starPositions = new Float32Array(starsCount * 3);
+          for (let i = 0; i < starsCount * 3; i += 3) {
+            starPositions[i] = (Math.random() - 0.5) * 200;
+            starPositions[i+1] = (Math.random() - 0.5) * 200;
+            starPositions[i+2] = (Math.random() - 0.5) * 200;
+          }
+          starsGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+          const starsMaterial = new THREE.PointsMaterial({color: 0xffffff, size: 0.2});
+          this.stars = new THREE.Points(starsGeometry, starsMaterial);
+          scene.add(this.stars);
+
+          // Platforms
+          this.platformGroup = new THREE.Group();
+          const platformsData = [
+            [6, 6, 1.5, 0x4a90e2, 0, 2, 0], // Spawn platform
+            [2.5, 2.5, 0.8, 0xe67e22, -5, 3.5, 4],
+            [2.5, 2.5, 0.8, 0xe67e22, 5, 3.2, -4],
+            [2, 2, 0.6, 0x2ecc71, -3, 5.0, -5],
+            [2, 2, 0.6, 0x2ecc71, 4, 4.5, 5],
+            [3, 3, 1.0, 0xf1c40f, -6, 6.0, -2],
+            [3, 3, 1.0, 0xf1c40f, 6, 5.0, 2],
+            [1.5, 1.5, 0.5, 0xe74c3c, -2, 7.5, 6],
+            [1.5, 1.5, 0.5, 0xe74c3c, 2, 8.0, -6],
+            [1.2, 1.2, 0.4, 0x9b59b6, -4, 10, 3],
+            [1.2, 1.2, 0.4, 0x9b59b6, 3, 11, -3],
+            [1.8, 1.8, 0.6, 0x3498db, -5, 13, -4],
+            [1.8, 1.8, 0.6, 0x3498db, 5, 12.5, 4],
+          ];
+
+          platformsData.forEach(data => {
+            const [w, d, h, color, x, y, z] = data;
+            const group = new THREE.Group();
+            
+            const geometry = new THREE.BoxGeometry(w, h, d);
+            const material = new THREE.MeshStandardMaterial({ 
+              color: color, emissive: new THREE.Color(color).multiplyScalar(0.2), roughness: 0.4, metalness: 0.1
+            });
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(x, y + h/2, z);
+
+            const edges = new THREE.EdgesGeometry(geometry);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 1 }));
+            line.position.copy(cube.position);
+            
+            group.add(cube);
+            group.add(line);
+            
+            // Initialization for animation
+            group.userData.originalY = group.position.y;
+            group.userData.speed = 0.5 + Math.random() * 0.5;
+            group.userData.offset = Math.random() * Math.PI * 2;
+            
+            this.platformGroup.add(group);
           });
+          scene.add(this.platformGroup);
+
+          // Energy Dust
+          const particleGeo = new THREE.BufferGeometry();
+          const particleCount = 300;
+          const particlePositions = new Float32Array(particleCount * 3);
+          for (let i = 0; i < particleCount * 3; i += 3) {
+            const r = 8 + Math.random() * 10;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            particlePositions[i] = Math.sin(phi) * Math.cos(theta) * r;
+            particlePositions[i+1] = Math.sin(phi) * Math.sin(theta) * r * 0.5 + 6;
+            particlePositions[i+2] = Math.cos(phi) * r;
+          }
+          particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+          const particleMat = new THREE.PointsMaterial({ color: 0xaaccff, size: 0.1, transparent: true, opacity: 0.5 });
+          this.particles = new THREE.Points(particleGeo, particleMat);
+          scene.add(this.particles);
+        },
+        
+        tick: function (time, timeDelta) {
+          const elapsedTime = time / 1000;
+          
+          this.platformGroup.children.forEach(child => {
+            child.position.y = child.userData.originalY + Math.sin(elapsedTime * child.userData.speed + child.userData.offset) * 0.15;
+            child.rotation.y += 0.002;
+          });
+
+          this.stars.rotation.y += 0.0001;
+          this.stars.rotation.x += 0.00005;
         }
       });
 
-      // 2. PROJECTILE BEHAVIOR
+      // 3. PROJECTILE BEHAVIOR
       AFRAME.registerComponent('projectile-behavior', {
         schema: {
           direction: {type: 'vec3'},
@@ -43,7 +187,7 @@
         }
       });
 
-      // 3. FRACTAL PARASITE BEHAVIOR
+      // 4. FRACTAL PARASITE BEHAVIOR
       AFRAME.registerComponent('parasite-behavior', {
         tick: function(time, timeDelta) {
           const camPos = new THREE.Vector3();
@@ -71,7 +215,7 @@
         }
       });
 
-      // 4. THE SPATIAL TEAR MANAGER
+      // 5. THE SPATIAL TEAR MANAGER
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
@@ -101,11 +245,8 @@
             rightEl.object3D.getWorldPosition(rightPos);
             
             const distance = leftPos.distanceTo(rightPos);
-            
-            // Added a minimum scale of 0.1 so it's instantly visible the millisecond you pinch
             const tearScale = Math.max(0.1, distance * 5); 
             
-            // We place it EXACTLY between your hands. No fancy vector projection to screw up.
             const midPoint = new THREE.Vector3().addVectors(leftPos, rightPos).multiplyScalar(0.5);
             
             this.rift.object3D.position.copy(midPoint);
@@ -138,7 +279,7 @@
         }
       });
 
-      // 5. THE KINETIC RECOIL CANNON 
+      // 6. THE KINETIC RECOIL CANNON 
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.previousPosition = new THREE.Vector3();
@@ -192,22 +333,21 @@
     </script>
   </head>
   <body>
-    <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #111111" rift-manager>
-      
-      <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222222" material="wireframe: true"></a-plane>
+    <!-- floating-level component overrides background color and generates geometry -->
+    <a-scene webxr="optionalFeatures: hand-tracking;" floating-level rift-manager>
 
-      <!-- DEBUG RIFT: Flat shader ensures it ignores lighting and is always visible. Starts invisible. -->
+      <!-- Dimensional Rift Plane, now using the void shader again -->
       <a-entity id="dimensional-rift" 
                 geometry="primitive: plane; width: 1; height: 1" 
-                material="color: #ff00ff; side: double; shader: flat" 
+                material="shader: rift-void; transparent: true; side: double; depthWrite: false" 
                 visible="false">
       </a-entity>
 
-      <!-- Player Rig -->
-      <a-entity id="rig" position="0 0 0">
+      <!-- Player Rig - Spawned at Y: 3.5 to stand perfectly on the central platform -->
+      <a-entity id="rig" position="0 3.5 0">
         <a-camera position="0 1.6 0"></a-camera>
-        <a-entity id="leftHand" hand-tracking-controls="hand: left;" pinch-debugger></a-entity>
-        <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon pinch-debugger></a-entity>
+        <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
+        <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon></a-entity>
       </a-entity>
 
     </a-scene>
