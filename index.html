@@ -5,29 +5,73 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Echo Weaver - Phase 5</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: monospace; }
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: radial-gradient(circle at center, #0a101d 0%, #000000 100%); 
+            color: white; 
+            font-family: 'Courier New', Courier, monospace; 
+        }
         #info {
             position: absolute;
-            top: 10px;
-            width: 100%;
+            top: 20px;
+            width: auto;
+            left: 50%;
+            transform: translateX(-50%);
             text-align: center;
             z-index: 100;
             pointer-events: none;
-            text-shadow: 1px 1px 2px black;
+            background: linear-gradient(135deg, rgba(0,20,30,0.85), rgba(0,10,15,0.95));
+            border: 1px solid #00ffff;
+            box-shadow: inset 0 0 20px rgba(0,255,255,0.1), 0 0 15px rgba(0,255,255,0.3);
+            border-radius: 6px;
+            padding: 15px 25px;
+            border-top: 3px solid #00ffff;
+            border-bottom: 3px solid #00ffff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            backdrop-filter: blur(5px);
         }
-        #stats { color: #ffffff; font-weight: bold; margin-top: 5px; }
-        .ammo-blue { color: #00aaff; }
-        .ammo-orange { color: #ffaa00; }
-        .ammo-purple { color: #aa00ff; }
+        .header-text {
+            color: #00ffff;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-bottom: 8px;
+            text-shadow: 0 0 8px #00ffff;
+        }
+        .sub-text {
+            font-size: 0.85em;
+            color: #aaaaaa;
+            margin-bottom: 12px;
+        }
+        .stat-container { 
+            display: flex; 
+            justify-content: center; 
+            gap: 15px; 
+            margin-top: 10px; 
+            font-weight: bold;
+        }
+        .stat-box { 
+            background: rgba(0, 0, 0, 0.6); 
+            padding: 6px 12px; 
+            border-left: 3px solid; 
+            border-radius: 2px;
+        }
+        .b-blue { border-color: #00aaff; color: #00aaff; }
+        .b-orange { border-color: #ffaa00; color: #ffaa00; }
+        .b-purple { border-color: #aa00ff; color: #aa00ff; }
+        .b-white { border-color: #ffffff; color: #ffffff; }
+
         #wave-announce {
             position: absolute;
             top: 40%;
             width: 100%;
             text-align: center;
-            font-size: 48px;
+            font-size: 52px;
             font-weight: bold;
             color: #ffaa00;
-            text-shadow: 0 0 20px #ff0000;
+            letter-spacing: 8px;
+            text-shadow: 0 0 20px #ff0000, 0 0 40px #ffaa00;
             z-index: 50;
             pointer-events: none;
             transition: opacity 1s ease-in-out;
@@ -46,8 +90,16 @@
 </head>
 <body>
     <div id="info">
-        Echo Weaver: Phase 5 (The Swarm)<br/>Match Ammo to Spells. 5 Blue + Line = UNIBEAM. Drop hand to a fist to vent Ammo.<br/><strong>Extend Thumb & Pinky (Shaka) to view Tactical HUD.</strong>
-        <div id="stats">Wave: 1 | Cap: 0/5 | Ammo: <span class="ammo-blue">B:0</span> <span class="ammo-orange">O:0</span> <span class="ammo-purple">P:0</span> | Kills: 0</div>
+        <div class="header-text">ECHO WEAVER OS // V.5.0</div>
+        <div class="sub-text">Match Ammo to Spells. 5 Blue + Line = UNIBEAM.<br/>Drop hand to a fist to vent Ammo.<br/><strong>Extend Thumb & Pinky (Shaka) for Tactical HUD.</strong></div>
+        <div id="stats" class="stat-container">
+            <div class="stat-box b-white" id="ui-wave">WAVE: 1</div>
+            <div class="stat-box b-white" id="ui-cap">CAP: 0/5</div>
+            <div class="stat-box b-blue" id="ui-b">B:0</div>
+            <div class="stat-box b-orange" id="ui-o">O:0</div>
+            <div class="stat-box b-purple" id="ui-p">P:0</div>
+            <div class="stat-box b-white" id="ui-kills">KIA: 0</div>
+        </div>
     </div>
     <div id="wave-announce">WAVE 1</div>
 
@@ -318,7 +370,6 @@
         }
 
         function updateStatsUI() {
-            // Display stats based on the hand holding the most items to keep HTML UI simple
             const h = (hands[0]?.userData.heldOrbs.length > hands[1]?.userData.heldOrbs.length) ? hands[0] : (hands[1] || hands[0]);
             if (!h) return;
 
@@ -327,45 +378,66 @@
             const o = h.userData.heldOrbs.filter(o => o.userData.spellType === 'triangle').length;
             const p = h.userData.heldOrbs.filter(o => o.userData.spellType === 'cross').length;
 
-            document.getElementById('stats').innerHTML = `Wave: ${currentWave} | Cap: ${total}/${MAX_HELD_ORBS} | Ammo: <span class="ammo-blue">B:${b}</span> <span class="ammo-orange">O:${o}</span> <span class="ammo-purple">P:${p}</span> | Kills: ${enemiesKilled}`;
+            document.getElementById('ui-wave').innerText = `WAVE: ${currentWave}`;
+            document.getElementById('ui-cap').innerText = `CAP: ${total}/${MAX_HELD_ORBS}`;
+            document.getElementById('ui-b').innerText = `B:${b}`;
+            document.getElementById('ui-o').innerText = `O:${o}`;
+            document.getElementById('ui-p').innerText = `P:${p}`;
+            document.getElementById('ui-kills').innerText = `KIA: ${enemiesKilled}`;
         }
 
         function updateHUDCanvas(timeSeconds, activeHand) {
             hudCtx.clearRect(0, 0, 512, 512);
             
-            // Background & Border
-            hudCtx.fillStyle = 'rgba(10, 20, 30, 0.85)';
+            // Background Base
+            hudCtx.fillStyle = 'rgba(5, 12, 20, 0.85)';
             hudCtx.fillRect(0, 0, 512, 512);
+            
+            // Tech Borders & Accents
             hudCtx.strokeStyle = '#00ffff';
-            hudCtx.lineWidth = 4;
-            hudCtx.strokeRect(2, 2, 508, 508);
+            hudCtx.lineWidth = 3;
+            hudCtx.strokeRect(15, 15, 482, 482);
+
+            hudCtx.fillStyle = '#00ffff';
+            // Corner Brackets
+            const cL = 35; // Corner Length
+            const cT = 8;  // Corner Thickness
+            // TL
+            hudCtx.fillRect(10, 10, cL, cT); hudCtx.fillRect(10, 10, cT, cL);
+            // TR
+            hudCtx.fillRect(502 - cL, 10, cL, cT); hudCtx.fillRect(494, 10, cT, cL);
+            // BL
+            hudCtx.fillRect(10, 494, cL, cT); hudCtx.fillRect(10, 502 - cL, cT, cL);
+            // BR
+            hudCtx.fillRect(502 - cL, 494, cL, cT); hudCtx.fillRect(494, 502 - cL, cT, cL);
 
             // Header
-            hudCtx.font = 'bold 32px monospace';
-            hudCtx.fillStyle = '#ffffff';
+            hudCtx.font = 'bold 34px Courier New';
+            hudCtx.fillStyle = '#00ffff';
             hudCtx.textAlign = 'center';
-            hudCtx.fillText('ECHO WEAVER TACTICAL OS', 256, 45);
+            hudCtx.fillText('TACTICAL OVERVIEW', 256, 55);
             
-            // Line break
+            // Grid Divider
             hudCtx.beginPath();
-            hudCtx.moveTo(20, 60);
-            hudCtx.lineTo(492, 60);
+            hudCtx.moveTo(30, 75);
+            hudCtx.lineTo(482, 75);
+            hudCtx.lineWidth = 1;
             hudCtx.stroke();
 
-            hudCtx.font = 'bold 24px monospace';
+            hudCtx.font = 'bold 24px Courier New';
             hudCtx.textAlign = 'left';
             
-            // Telemetry: Time & Wave
+            // Telemetry
+            hudCtx.fillStyle = '#ffffff';
             const mins = Math.floor(timeSeconds / 60);
             const secs = Math.floor(timeSeconds % 60).toString().padStart(2, '0');
-            hudCtx.fillText(`TIME ONLINE : ${mins}:${secs}`, 30, 100);
-            hudCtx.fillText(`CURRENT WAVE: ${currentWave}`, 30, 140);
-            hudCtx.fillText(`HOSTILES KIA: ${enemiesKilled}`, 30, 180);
+            hudCtx.fillText(`SYS. UPTIME  : ${mins}:${secs}`, 40, 115);
+            hudCtx.fillText(`THREAT LEVEL : WAVE ${currentWave}`, 40, 155);
+            hudCtx.fillText(`TARGETS KIA  : ${enemiesKilled}`, 40, 195);
 
-            // Line break
             hudCtx.beginPath();
-            hudCtx.moveTo(20, 200);
-            hudCtx.lineTo(492, 200);
+            hudCtx.moveTo(30, 215);
+            hudCtx.lineTo(482, 215);
             hudCtx.stroke();
 
             // Ammunition Status
@@ -374,29 +446,27 @@
             const p = activeHand?.userData.heldOrbs.filter(o => o.userData.spellType === 'cross').length || 0;
             const total = activeHand?.userData.heldOrbs.length || 0;
 
-            hudCtx.fillStyle = '#ffffff';
-            hudCtx.fillText(`GAUNTLET AMMO [${total}/${MAX_HELD_ORBS}]:`, 30, 240);
+            hudCtx.fillStyle = '#aaaaaa';
+            hudCtx.fillText(`MAGAZINE STATUS [${total}/${MAX_HELD_ORBS}]`, 40, 255);
             
-            hudCtx.fillStyle = '#00aaff'; 
-            hudCtx.fillText(`BLUE   (Line) : ${b}`, 50, 280);
-            hudCtx.fillStyle = '#ffaa00'; 
-            hudCtx.fillText(`ORANGE (Tri)  : ${o}`, 50, 310);
-            hudCtx.fillStyle = '#aa00ff'; 
-            hudCtx.fillText(`PURPLE (Cross): ${p}`, 50, 340);
+            // Custom drawn progress bars
+            hudCtx.font = '22px Courier New';
+            hudCtx.fillStyle = '#00aaff'; hudCtx.fillText(`[BLUE]   LINE : ${b}`, 50, 295);
+            hudCtx.fillStyle = '#ffaa00'; hudCtx.fillText(`[ORANGE] TRI  : ${o}`, 50, 325);
+            hudCtx.fillStyle = '#aa00ff'; hudCtx.fillText(`[PURPLE] CRS  : ${p}`, 50, 355);
 
-            // Line break
             hudCtx.beginPath();
-            hudCtx.moveTo(20, 360);
-            hudCtx.lineTo(492, 360);
+            hudCtx.moveTo(30, 375);
+            hudCtx.lineTo(482, 375);
             hudCtx.stroke();
 
             // Sigil Legend
             hudCtx.fillStyle = '#ffffff';
-            hudCtx.fillText(`SIGIL LEGEND:`, 30, 400);
-            hudCtx.font = '20px monospace';
-            hudCtx.fillText(`Line     -> Beam / Unibeam (5 Blue)`, 50, 430);
-            hudCtx.fillText(`Triangle -> Kinetic Repulse`, 50, 460);
-            hudCtx.fillText(`Cross/X  -> Shotgun Barrage`, 50, 490);
+            hudCtx.fillText(`COMBAT PROTOCOLS:`, 40, 410);
+            hudCtx.font = '18px Courier New';
+            hudCtx.fillStyle = '#00aaff'; hudCtx.fillText(`> LINE : Beam / Unibeam (5 Blue)`, 50, 440);
+            hudCtx.fillStyle = '#ffaa00'; hudCtx.fillText(`> TRI  : Kinetic Repulse`, 50, 465);
+            hudCtx.fillStyle = '#aa00ff'; hudCtx.fillText(`> CRS/X: Tracking Swarm`, 50, 490);
 
             hudTexture.needsUpdate = true;
         }
@@ -577,7 +647,6 @@
             const spread = thumbTip.distanceTo(pinkyTip);
             const indexCurl = indexTip.distanceTo(wrist);
 
-            // Shaka: Wide spread, tight curl on index
             return spread > 0.12 && indexCurl < 0.09; 
         }
 
@@ -590,7 +659,6 @@
             const currentCharge = Math.max(blueL, blueR);
 
             if (currentCharge > 0 && currentCharge < MAX_HELD_ORBS && enemies.length > 0) {
-                // Standard Smart Targeting based on Blue Orbs
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 const candidates = [];
 
@@ -605,7 +673,7 @@
                     lockedEnemies.push(candidates[i].enemy);
                 }
             } else if (currentCharge === MAX_HELD_ORBS) {
-                // UNIBEAM TARGETING MODE - Paints nothing, manual aim required
+                // UNIBEAM TARGETING MODE - Manual aim required
                 lockedEnemies = [];
             }
 
@@ -624,7 +692,6 @@
         function fireSpell(type, origin, powerLevel) {
             if (type === 'line') {
                 if (powerLevel === MAX_HELD_ORBS) {
-                    // FIX: UNIBEAM - Project origin forward so it doesn't clip VR camera
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
                     const BEAM_LENGTH = 40;
                     
@@ -639,7 +706,6 @@
                     mesh.quaternion.copy(camera.quaternion); 
                     scene.add(mesh);
 
-                    // Physics math: Kill everything in the beam path
                     const endPoint = startPos.clone().add(forward.multiplyScalar(BEAM_LENGTH));
                     const rayLine = new THREE.Line3(startPos, endPoint);
                     const closestPoint = new THREE.Vector3();
@@ -652,21 +718,19 @@
                         }
                     }
 
-                    // FIX: 1.5 Second persistent beam with fade-out
                     let ticks = 0;
                     const fadeInt = setInterval(() => {
                         ticks++;
                         mesh.scale.x *= 0.95;
                         mesh.scale.z *= 0.95;
                         mat.opacity -= 0.02; 
-                        if (ticks >= 50) { // 50 * 30ms = 1500ms
+                        if (ticks >= 50) { 
                             clearInterval(fadeInt);
                             scene.remove(mesh);
                         }
                     }, 30);
                     
                 } else if (lockedEnemies.length > 0) {
-                    // SMART MUNITIONS
                     lockedEnemies.forEach(targetEnemy => {
                         const start = origin.clone();
                         const end = targetEnemy.position.clone();
@@ -688,7 +752,6 @@
                 }
 
             } else if (type === 'triangle') {
-                // KINETIC REPULSE
                 const REPULSE_RADIUS = 3.0 + (powerLevel * 1.5); 
                 const PUSH_FORCE = 8.0 * powerLevel; 
                 
@@ -709,43 +772,53 @@
                         enemy.userData.state = 'repulsed';
                         const pushDir = new THREE.Vector3().subVectors(enemy.position, origin).normalize();
                         
-                        // Brutes are heavy. Less knockback.
                         const massFactor = enemy.userData.type === 'brute' ? 0.4 : 1.0;
                         enemy.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE * massFactor)); 
                     }
                 });
             } else if (type === 'cross' || type === 'x') {
-                // CROSS BARRAGE
-                const divergence = Math.PI / 10; 
-                const angles = [
-                    new THREE.Euler(divergence, divergence, 0),
-                    new THREE.Euler(divergence, -divergence, 0),
-                    new THREE.Euler(-divergence, divergence, 0),
-                    new THREE.Euler(-divergence, -divergence, 0)
-                ];
+                // CROSS BARRAGE - Upgraded to Seek & Destroy Swarm
+                const numBeams = 4 * powerLevel;
+                
+                // Sort active hostiles by distance to the origin point of the cast
+                const sortedEnemies = [...enemies].sort((a, b) => a.position.distanceTo(origin) - b.position.distanceTo(origin));
 
-                angles.forEach(euler => {
-                    const directionQuat = camera.quaternion.clone().multiply(new THREE.Quaternion().setFromEuler(euler));
-                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(directionQuat).normalize();
-                    
-                    const beamThickness = 0.01 * powerLevel;
-                    const geo = new THREE.CylinderGeometry(beamThickness, beamThickness, 10);
+                if (sortedEnemies.length > 0) {
+                    for (let i = 0; i < numBeams; i++) {
+                        // Loop through closest targets if we have more beams than enemies
+                        const targetEnemy = sortedEnemies[i % sortedEnemies.length]; 
+                        
+                        const start = origin.clone();
+                        const end = targetEnemy.position.clone();
+                        const distance = start.distanceTo(end);
+                        const mid = start.clone().lerp(end, 0.5);
+
+                        const beamThickness = 0.015;
+                        const geo = new THREE.CylinderGeometry(beamThickness, beamThickness, distance);
+                        geo.rotateX(Math.PI / 2); 
+                        const mat = new THREE.MeshBasicMaterial({color: 0xaa00ff, transparent: true, opacity: 0.9});
+                        const mesh = new THREE.Mesh(geo, mat);
+                        
+                        mesh.position.copy(mid);
+                        mesh.lookAt(end); 
+                        scene.add(mesh);
+
+                        damageEnemy(targetEnemy, 1);
+                        setTimeout(() => scene.remove(mesh), 200 + (powerLevel * 50));
+                    }
+                } else {
+                    // Fallback to dumb fire if no enemies exist (unlikely but safe)
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+                    const geo = new THREE.CylinderGeometry(0.01 * powerLevel, 0.01 * powerLevel, 10);
                     geo.translate(0, 5, 0); 
                     geo.rotateX(-Math.PI / 2); 
                     const mat = new THREE.MeshBasicMaterial({color: 0xaa00ff, transparent: true, opacity: 0.8});
                     const mesh = new THREE.Mesh(geo, mat);
                     mesh.position.copy(origin);
-                    mesh.quaternion.copy(directionQuat);
+                    mesh.quaternion.copy(camera.quaternion);
                     scene.add(mesh);
-                    
-                    const raycaster = new THREE.Raycaster(origin, forward);
-                    const intersects = raycaster.intersectObjects(enemies);
-                    
-                    if (intersects.length > 0) {
-                        damageEnemy(intersects[0].object, 1);
-                    }
-                    setTimeout(() => scene.remove(mesh), 200 + (powerLevel * 100)); 
-                });
+                    setTimeout(() => scene.remove(mesh), 300);
+                }
             }
         }
 
@@ -920,14 +993,12 @@
             if (waveState === 'spawning') {
                 enemySpawnTimer -= timeDelta;
                 if (enemySpawnTimer <= 0 && enemiesSpawnedThisWave < enemiesTotalThisWave) {
-                    // Spawn rates accelerate as wave progresses
                     enemySpawnTimer = Math.max(0.5, baseEnemySpawnRate - (currentWave * 0.2)); 
                     
                     const angle = Math.PI + (Math.random() * Math.PI); 
                     const radius = 6 + (Math.random() * 2); 
                     const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
                     
-                    // Brute injection chance scales with wave level
                     let type = 'drone';
                     if (currentWave >= 2 && Math.random() < 0.15 + (currentWave * 0.05)) {
                         type = 'brute';
