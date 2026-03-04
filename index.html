@@ -15,7 +15,10 @@
             pointer-events: none;
             text-shadow: 1px 1px 2px black;
         }
-        #stats { color: #00ffff; font-weight: bold; margin-top: 5px; }
+        #stats { color: #ffffff; font-weight: bold; margin-top: 5px; }
+        .ammo-blue { color: #00aaff; }
+        .ammo-orange { color: #ffaa00; }
+        .ammo-purple { color: #aa00ff; }
         #wave-announce {
             position: absolute;
             top: 40%;
@@ -28,7 +31,7 @@
             z-index: 50;
             pointer-events: none;
             transition: opacity 1s ease-in-out;
-            opacity: 1; /* Starts visible for Wave 1 */
+            opacity: 1; 
         }
     </style>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
@@ -43,8 +46,8 @@
 </head>
 <body>
     <div id="info">
-        Echo Weaver: Phase 5 (The Swarm)<br/>Survive the Waves. Max Charge Line = UNIBEAM.
-        <div id="stats">Wave: 1 | Charge: 0/3 | Kills: 0</div>
+        Echo Weaver: Phase 5 (The Swarm)<br/>Match Ammo to Spells. 5 Blue + Line = UNIBEAM. Drop hand to a fist to vent Ammo.
+        <div id="stats">Wave: 1 | Cap: 0/5 | Ammo: <span class="ammo-blue">B:0</span> <span class="ammo-orange">O:0</span> <span class="ammo-purple">P:0</span> | Kills: 0</div>
     </div>
     <div id="wave-announce">WAVE 1</div>
 
@@ -64,15 +67,15 @@
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
         const PINCH_THRESH = 0.03;
-        const ORB_SPAWN_RATE = 1.2;   
-        const MAX_HELD_ORBS = 3;      
+        const ORB_SPAWN_RATE = 1.0;   
+        const MAX_HELD_ORBS = 5;      
         let orbSpawnTimer = 0;
 
         // Wave Logic
         let currentWave = 1;
         let enemiesTotalThisWave = 30;
         let enemiesSpawnedThisWave = 0;
-        let waveState = 'spawning'; // 'spawning', 'intermission'
+        let waveState = 'spawning'; 
         let intermissionTimer = 0;
         let baseEnemySpawnRate = 2.0;
         let enemySpawnTimer = 0;
@@ -91,6 +94,13 @@
         let isDrawing = false;
         let drawPoints3D = [];
         let activeCastingHand = null;
+
+        // --- Ammo Data ---
+        const SPELL_TYPES = [
+            { type: 'line', color: 0x00aaff },     // Blue
+            { type: 'triangle', color: 0xffaa00 }, // Orange
+            { type: 'cross', color: 0xaa00ff }     // Purple
+        ];
 
         // --- $1 Recognizer Implementation (Compact) ---
         class Point { constructor(x, y) { this.x = x; this.y = y; } }
@@ -269,10 +279,10 @@
             trailLine = new THREE.Line(trailGeo, trailMat);
             scene.add(trailLine);
 
-            // --- Lock-on Reticles Pool ---
+            // --- Lock-on Reticles Pool (Up to 5 now) ---
             for (let i = 0; i < MAX_HELD_ORBS; i++) {
                 const rGeo = new THREE.RingGeometry(0.18, 0.22, 16);
-                const rMat = new THREE.MeshBasicMaterial({color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.7});
+                const rMat = new THREE.MeshBasicMaterial({color: 0x00aaff, side: THREE.DoubleSide, transparent: true, opacity: 0.7});
                 const reticle = new THREE.Mesh(rGeo, rMat);
                 reticle.visible = false;
                 scene.add(reticle);
@@ -291,10 +301,16 @@
         }
 
         function updateStatsUI() {
-            const chargeL = hands[0]?.userData.heldOrbs.length || 0;
-            const chargeR = hands[1]?.userData.heldOrbs.length || 0;
-            const maxCharge = Math.max(chargeL, chargeR);
-            document.getElementById('stats').innerText = `Wave: ${currentWave} | Charge: ${maxCharge}/${MAX_HELD_ORBS} | Kills: ${enemiesKilled}`;
+            // Display stats based on the hand holding the most items to keep UI simple
+            const h = (hands[0]?.userData.heldOrbs.length > hands[1]?.userData.heldOrbs.length) ? hands[0] : (hands[1] || hands[0]);
+            if (!h) return;
+
+            const total = h.userData.heldOrbs.length;
+            const b = h.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length;
+            const o = h.userData.heldOrbs.filter(o => o.userData.spellType === 'triangle').length;
+            const p = h.userData.heldOrbs.filter(o => o.userData.spellType === 'cross').length;
+
+            document.getElementById('stats').innerHTML = `Wave: ${currentWave} | Cap: ${total}/${MAX_HELD_ORBS} | Ammo: <span class="ammo-blue">B:${b}</span> <span class="ammo-orange">O:${o}</span> <span class="ammo-purple">P:${p}</span> | Kills: ${enemiesKilled}`;
         }
 
         function damageHeartStone(amount) {
@@ -323,7 +339,6 @@
                 ann.style.opacity = 1;
                 setTimeout(() => { ann.style.opacity = 0; }, 3000);
 
-                updateStatsUI();
                 healthRing.scale.set(1, 1, 1);
                 healthRing.material.color.setHex(0x00ff00);
                 
@@ -332,6 +347,7 @@
                 enemies.forEach(enemy => scene.remove(enemy));
                 enemies = [];
                 hands.forEach(h => { if(h) h.userData.heldOrbs = []; });
+                updateStatsUI();
             }
         }
 
@@ -356,14 +372,22 @@
         }
 
         function createOrb(position) {
-            const colorHex = 0x00aaff;
+            // Randomize Elemental Type
+            const typeInfo = SPELL_TYPES[Math.floor(Math.random() * SPELL_TYPES.length)];
+            
             const geo = new THREE.SphereGeometry(0.06, 16, 16);
             const mat = new THREE.MeshStandardMaterial({
-                color: colorHex, emissive: colorHex, emissiveIntensity: 0.8, roughness: 0.2, metalness: 0.8
+                color: typeInfo.color, emissive: typeInfo.color, emissiveIntensity: 0.8, roughness: 0.2, metalness: 0.8
             });
             const orb = new THREE.Mesh(geo, mat);
             orb.position.copy(position);
-            orb.userData = { baseY: position.y, phase: Math.random() * Math.PI * 2, heldBy: null, state: 'idle' };
+            orb.userData = { 
+                baseY: position.y, 
+                phase: Math.random() * Math.PI * 2, 
+                heldBy: null, 
+                state: 'idle',
+                spellType: typeInfo.type // Bind the color to the spell mechanic
+            };
             scene.add(orb);
             orbs.push(orb);
         }
@@ -455,12 +479,14 @@
 
         function updateTargeting() {
             lockedEnemies = [];
-            const chargeL = hands[0]?.userData.heldOrbs.length || 0;
-            const chargeR = hands[1]?.userData.heldOrbs.length || 0;
-            const currentCharge = Math.max(chargeL, chargeR);
+            
+            // Lockons only apply to the Blue (Line) Orbs
+            const blueL = hands[0]?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
+            const blueR = hands[1]?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
+            const currentCharge = Math.max(blueL, blueR);
 
             if (currentCharge > 0 && currentCharge < MAX_HELD_ORBS && enemies.length > 0) {
-                // Standard Smart Targeting
+                // Standard Smart Targeting based on Blue Orbs
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 const candidates = [];
 
@@ -475,7 +501,7 @@
                     lockedEnemies.push(candidates[i].enemy);
                 }
             } else if (currentCharge === MAX_HELD_ORBS) {
-                // UNIBEAM TARGETING MODE - Paints nothing, you must aim the chest laser.
+                // UNIBEAM TARGETING MODE - Paints nothing, manual aim required
                 lockedEnemies = [];
             }
 
@@ -494,34 +520,46 @@
         function fireSpell(type, origin, powerLevel) {
             if (type === 'line') {
                 if (powerLevel === MAX_HELD_ORBS) {
-                    // UNIBEAM (Iron Man Overload)
+                    // FIX: UNIBEAM - Project origin forward so it doesn't clip VR camera
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-                    const BEAM_LENGTH = 30;
+                    const BEAM_LENGTH = 40;
                     
-                    const geo = new THREE.CylinderGeometry(0.3, 0.3, BEAM_LENGTH); // Massive cylinder
+                    const startPos = origin.clone().add(forward.multiplyScalar(0.6));
+                    
+                    const geo = new THREE.CylinderGeometry(0.5, 0.5, BEAM_LENGTH, 16);
                     geo.translate(0, BEAM_LENGTH/2, 0); 
                     geo.rotateX(-Math.PI / 2); 
-                    const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.9});
+                    const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending});
                     const mesh = new THREE.Mesh(geo, mat);
-                    mesh.position.copy(origin);
+                    mesh.position.copy(startPos);
                     mesh.quaternion.copy(camera.quaternion); 
                     scene.add(mesh);
 
-                    // Physics math: Line3 to check distance of enemies to the beam's core
-                    const endPoint = origin.clone().add(forward.multiplyScalar(BEAM_LENGTH));
-                    const rayLine = new THREE.Line3(origin, endPoint);
+                    // Physics math: Kill everything in the beam path
+                    const endPoint = startPos.clone().add(forward.multiplyScalar(BEAM_LENGTH));
+                    const rayLine = new THREE.Line3(startPos, endPoint);
                     const closestPoint = new THREE.Vector3();
 
-                    // Reverse loop to safely kill multiple enemies instantly
                     for(let i = enemies.length - 1; i >= 0; i--) {
                         const enemy = enemies[i];
                         rayLine.closestPointToPoint(enemy.position, true, closestPoint);
-                        if (closestPoint.distanceTo(enemy.position) <= 0.4) { // Cylinder radius
-                            damageEnemy(enemy, 5); // Massive damage, wipes Brutes instantly
+                        if (closestPoint.distanceTo(enemy.position) <= 0.6) { 
+                            damageEnemy(enemy, 5); 
                         }
                     }
 
-                    setTimeout(() => scene.remove(mesh), 500); // Lingers longer for effect
+                    // FIX: 1.5 Second persistent beam with fade-out
+                    let ticks = 0;
+                    const fadeInt = setInterval(() => {
+                        ticks++;
+                        mesh.scale.x *= 0.95;
+                        mesh.scale.z *= 0.95;
+                        mat.opacity -= 0.02; 
+                        if (ticks >= 50) { // 50 * 30ms = 1500ms
+                            clearInterval(fadeInt);
+                            scene.remove(mesh);
+                        }
+                    }, 30);
                     
                 } else if (lockedEnemies.length > 0) {
                     // SMART MUNITIONS
@@ -543,25 +581,6 @@
                         damageEnemy(targetEnemy, 1);
                         setTimeout(() => scene.remove(mesh), 200);
                     });
-                } else {
-                    // DUMB FIRE FALLBACK
-                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-                    const geo = new THREE.CylinderGeometry(0.01 * powerLevel, 0.01 * powerLevel, 10);
-                    geo.translate(0, 5, 0); 
-                    geo.rotateX(-Math.PI / 2); 
-                    const mat = new THREE.MeshBasicMaterial({color: 0x00aaff, transparent: true, opacity: 0.8});
-                    const mesh = new THREE.Mesh(geo, mat);
-                    mesh.position.copy(origin);
-                    mesh.quaternion.copy(camera.quaternion); 
-                    scene.add(mesh);
-                    
-                    const raycaster = new THREE.Raycaster(origin, forward);
-                    const intersects = raycaster.intersectObjects(enemies);
-                    
-                    if (intersects.length > 0) {
-                        damageEnemy(intersects[0].object, 1);
-                    }
-                    setTimeout(() => scene.remove(mesh), 200);
                 }
 
             } else if (type === 'triangle') {
@@ -609,7 +628,7 @@
                     const geo = new THREE.CylinderGeometry(beamThickness, beamThickness, 10);
                     geo.translate(0, 5, 0); 
                     geo.rotateX(-Math.PI / 2); 
-                    const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.8});
+                    const mat = new THREE.MeshBasicMaterial({color: 0xaa00ff, transparent: true, opacity: 0.8});
                     const mesh = new THREE.Mesh(geo, mat);
                     mesh.position.copy(origin);
                     mesh.quaternion.copy(directionQuat);
@@ -643,19 +662,27 @@
                 const activeHand = hands[activeCastingHand === 'left' ? 0 : 1];
                 
                 if (activeHand && activeHand.userData.heldOrbs.length > 0) {
-                    const origin = activeHand.joints['wrist'].position.clone();
-                    const powerLevel = activeHand.userData.heldOrbs.length;
                     
-                    // Consume all stored energy
-                    activeHand.userData.heldOrbs.forEach(orb => {
-                        scene.remove(orb);
-                        const index = orbs.indexOf(orb);
-                        if(index > -1) orbs.splice(index, 1);
-                    });
-                    activeHand.userData.heldOrbs = [];
-                    updateStatsUI();
-                    
-                    fireSpell(finalSpell, origin, powerLevel);
+                    // NEW MECHANIC: Filter orbs to only consume the ones matching the spell type
+                    const matchingOrbs = activeHand.userData.heldOrbs.filter(o => o.userData.spellType === finalSpell);
+
+                    if (matchingOrbs.length > 0) {
+                        const origin = activeHand.joints['wrist'].position.clone();
+                        const powerLevel = matchingOrbs.length;
+                        
+                        // Consume ONLY the matching energy
+                        matchingOrbs.forEach(orb => {
+                            scene.remove(orb);
+                            const index = orbs.indexOf(orb);
+                            if(index > -1) orbs.splice(index, 1);
+                        });
+                        
+                        // Leave the rest in the gauntlet
+                        activeHand.userData.heldOrbs = activeHand.userData.heldOrbs.filter(o => o.userData.spellType !== finalSpell);
+                        updateStatsUI();
+                        
+                        fireSpell(finalSpell, origin, powerLevel);
+                    }
                 }
             }
         }
@@ -699,7 +726,7 @@
                 const pinching = isPinching(hand);
                 const wristPos = hand.joints['wrist'].position;
 
-                // Vent Energy (Drop)
+                // Vent Energy (Drop) - Empties all stored orbs
                 if (hand.userData.heldOrbs.length > 0 && isClosed && !isDrawing) {
                     hand.userData.heldOrbs.forEach(orb => {
                         orb.userData.heldBy = null; 
@@ -809,7 +836,7 @@
 
             // Spawn Ammo
             orbSpawnTimer -= timeDelta;
-            if (orbSpawnTimer <= 0 && orbs.length < 8) { 
+            if (orbSpawnTimer <= 0 && orbs.length < 10) { // Bumped ambient ammo pool to 10
                 orbSpawnTimer = ORB_SPAWN_RATE;
                 const angle = Math.PI + (Math.random() * Math.PI); 
                 const radius = 0.3 + Math.random() * 0.2; 
