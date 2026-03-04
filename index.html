@@ -1,17 +1,66 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Quantum Resonance: Enhanced Floating Sector</title>
+    <title>Quantum Resonance: Floating Sector</title>
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    
     <script>
-      // ============================
-      // 1. SPATIAL TEAR SHADER (improved glow)
-      // ============================
+      // 0. GAME MANAGER SYSTEM (Handles globals, score, and state cleanly)
+      AFRAME.registerSystem('game-manager', {
+        init: function() {
+          this.targets = [];
+          this.projectiles = [];
+          this.score = 0;
+          
+          // Wait for DOM to load before grabbing UI elements
+          this.el.addEventListener('loaded', () => {
+            this.scoreEl = document.querySelector('#score-display');
+            this.damageEl = document.querySelector('#damage-overlay');
+          });
+        },
+        registerTarget: function(t) { this.targets.push(t); },
+        unregisterTarget: function(t) {
+          const idx = this.targets.indexOf(t);
+          if (idx > -1) this.targets.splice(idx, 1);
+        },
+        registerProjectile: function(p) { this.projectiles.push(p); },
+        unregisterProjectile: function(p) {
+          const idx = this.projectiles.indexOf(p);
+          if (idx > -1) this.projectiles.splice(idx, 1);
+        },
+        addScore: function() {
+          this.score += 100;
+          if (this.scoreEl) this.scoreEl.setAttribute('value', 'SCORE: ' + this.score);
+        },
+        takeDamage: function() {
+          if (this.damageEl) {
+            // Flash the screen red
+            this.damageEl.setAttribute('material', 'opacity: 0.6');
+            setTimeout(() => {
+              this.damageEl.setAttribute('animation', 'property: material.opacity; to: 0; dur: 500; easing: easeOutQuad');
+            }, 50);
+            console.log("CRITICAL HIT. Hull integrity compromised.");
+          }
+        },
+        spawnExplosion: function(pos) {
+          // Visual feedback for destroyed targets
+          const flash = document.createElement('a-entity');
+          flash.setAttribute('geometry', 'primitive: sphere; radius: 0.2');
+          flash.setAttribute('material', 'color: #ff00ff; shader: flat; transparent: true');
+          flash.setAttribute('position', pos);
+          flash.setAttribute('animation__scale', 'property: scale; to: 4 4 4; dur: 250; easing: easeOutQuad');
+          flash.setAttribute('animation__fade', 'property: material.opacity; to: 0; dur: 250; easing: easeOutQuad');
+          this.el.appendChild(flash);
+          setTimeout(() => flash.parentNode.removeChild(flash), 300);
+        }
+      });
+
+      // 1. THE SPATIAL TEAR SHADER (Now with smooth organic edges)
       AFRAME.registerShader('rift-void', {
         schema: {
-          timeMsec: { type: 'time', is: 'uniform' },
-          colorEdge: { type: 'color', is: 'uniform', default: '#00ffcc' },
-          colorVoid: { type: 'color', is: 'uniform', default: '#050505' }
+          timeMsec: {type: 'time', is: 'uniform'},
+          colorEdge: {type: 'color', is: 'uniform', default: '#00ffcc'}, 
+          colorVoid: {type: 'color', is: 'uniform', default: '#050505'}  
         },
         vertexShader: `
           varying vec2 vUv;
@@ -49,36 +98,37 @@
             vec3 finalColor = mix(colorVoid, colorEdge, glowMask * 2.5);
             finalColor += colorEdge * noise(vec2(time * 20.0, a * 10.0)) * glowMask * 0.5;
 
-            float alpha = step(distortedRadius, 0.9);
+            // Consultant fix #13: Smooth organic alpha instead of harsh jagged steps
+            float alpha = smoothstep(0.95, 0.70, distortedRadius);
             gl_FragColor = vec4(finalColor, alpha);
           }
         `
       });
 
-      // ============================
-      // 2. FLOATING LEVEL (fixed bobbing + targets as children)
-      // ============================
+      // 2. FLOATING ENVIRONMENT GENERATOR
       AFRAME.registerComponent('floating-level', {
         init: function () {
           const scene = this.el.sceneEl.object3D;
+          this.system = this.el.sceneEl.systems['game-manager'];
           
           scene.background = new THREE.Color(0x111122);
-          scene.fog = new THREE.Fog(0x111122, 20, 60);
+          scene.fog = new THREE.FogExp2(0x111122, 0.03);
 
-          // Lights
           const ambientLight = new THREE.AmbientLight(0x404060);
           scene.add(ambientLight);
+
           const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
           dirLight.position.set(5, 20, 10);
           scene.add(dirLight);
+
           const fillLight = new THREE.PointLight(0x4466ff, 0.5);
           fillLight.position.set(-5, 0, 5);
           scene.add(fillLight);
+
           const backLight = new THREE.PointLight(0xffaa66, 0.3);
           backLight.position.set(0, 5, -15);
           scene.add(backLight);
 
-          // Stars
           const starsGeometry = new THREE.BufferGeometry();
           const starsCount = 1000;
           const starPositions = new Float32Array(starsCount * 3);
@@ -90,15 +140,14 @@
           starsGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
           const starsMaterial = new THREE.PointsMaterial({color: 0xffffff, size: 0.2});
           this.stars = new THREE.Points(starsGeometry, starsMaterial);
+          // Consultant fix #15: Prevent needless CPU culling math
+          this.stars.frustumCulled = false; 
           scene.add(this.stars);
 
-          // Holds all platforms
-          this.platforms = []; 
-          window.shootableTargets = []; // global for collision
+          this.platformGroup = new THREE.Group();
 
-          // Platform definitions: [width, depth, height, color, x, y, z]
           const platformsData = [
-            [6, 6, 1.5, 0x4a90e2, 0, 2, 0],   // floor
+            [6, 6, 1.5, 0x4a90e2, 0, 2, 0], 
             [2.5, 2.5, 0.8, 0xe67e22, -3, 3.5, -6],
             [2.5, 2.5, 0.8, 0xe67e22, 0, 4.0, -8],
             [2.5, 2.5, 0.8, 0xe67e22, 3, 3.5, -6],
@@ -112,53 +161,58 @@
 
           platformsData.forEach(data => {
             const [w, d, h, color, x, y, z] = data;
-            
-            // Create a group per platform so they can bob independently
             const group = new THREE.Group();
-            group.position.set(x, y + h/2, z); // base at y, cube center at y+h/2
-
-            // Store bobbing parameters on the group
-            group.userData = {
-              bobSpeed: 0.5 + Math.random() * 0.5,
-              bobOffset: Math.random() * Math.PI * 2,
-              baseY: y + h/2
-            };
-
-            // The solid cube
+            
+            // Consultant fix #2: Set absolute position on the group so bobbing math works relative to origin
+            group.position.set(x, y, z);
+            
             const geometry = new THREE.BoxGeometry(w, h, d);
             const material = new THREE.MeshStandardMaterial({ 
-              color: color, 
-              emissive: new THREE.Color(color).multiplyScalar(0.2), 
-              roughness: 0.4, 
-              metalness: 0.1
+              color: color, emissive: new THREE.Color(color).multiplyScalar(0.2), roughness: 0.4, metalness: 0.1
             });
             const cube = new THREE.Mesh(geometry, material);
-            cube.position.set(0, 0, 0); // relative to group
-            group.add(cube);
+            // Center cube vertically in its own group
+            cube.position.set(0, h/2, 0);
 
-            // Edges
             const edges = new THREE.EdgesGeometry(geometry);
-            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 1 }));
             line.position.copy(cube.position);
+            
+            group.add(cube);
             group.add(line);
-
-            // Add target if not the floor
+            
+            // Generate targets
             if (z < -1) {
-              const targetGeo = new THREE.OctahedronGeometry(0.5); // slightly larger
+              const targetGeo = new THREE.OctahedronGeometry(0.4); 
               const targetMat = new THREE.MeshStandardMaterial({ color: 0xff0044, emissive: 0xaa0022, wireframe: true });
               const target = new THREE.Mesh(targetGeo, targetMat);
-              target.position.set(0, h/2 + 1.2, 0); // above cube
+              // Float relative to the group
+              target.position.set(0, h + 1.2, 0); 
               group.add(target);
               
-              window.shootableTargets.push(target);
+              // Register to system, eliminating globals
+              this.system.registerTarget(target);
               group.userData.targets = [target];
             }
 
-            scene.add(group);
-            this.platforms.push(group);
-          });
+            // Depth shadow underneath to fix VR spatial awareness (Consultant fix #11)
+            if (z < -1) {
+              const shadowGeo = new THREE.PlaneGeometry(w, d);
+              const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false });
+              const shadow = new THREE.Mesh(shadowGeo, shadowMat);
+              shadow.rotation.x = -Math.PI / 2;
+              shadow.position.set(x, -10, z); // Project way down into the fog
+              scene.add(shadow);
+            }
 
-          // Floating particles
+            group.userData.originalY = group.position.y;
+            group.userData.speed = 0.5 + Math.random() * 0.5;
+            group.userData.offset = Math.random() * Math.PI * 2;
+            
+            this.platformGroup.add(group);
+          });
+          scene.add(this.platformGroup);
+
           const particleGeo = new THREE.BufferGeometry();
           const particleCount = 300;
           const particlePositions = new Float32Array(particleCount * 3);
@@ -173,175 +227,136 @@
           particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
           const particleMat = new THREE.PointsMaterial({ color: 0xaaccff, size: 0.1, transparent: true, opacity: 0.5 });
           this.particles = new THREE.Points(particleGeo, particleMat);
+          this.particles.frustumCulled = false;
           scene.add(this.particles);
         },
         
         tick: function (time, timeDelta) {
-          const elapsed = time / 1000;
-          
-          // Bob each platform individually
-          this.platforms.forEach(platform => {
-            if (platform.userData.baseY !== undefined) {
-              platform.position.y = platform.userData.baseY + 
-                Math.sin(elapsed * platform.userData.bobSpeed + platform.userData.bobOffset) * 0.15;
-            }
-            // Rotate whole platform slowly
-            platform.rotation.y += 0.002;
+          const elapsedTime = time / 1000;
+          this.platformGroup.children.forEach(child => {
+            child.position.y = child.userData.originalY + Math.sin(elapsedTime * child.userData.speed + child.userData.offset) * 0.15;
+            child.rotation.y += 0.002;
 
-            // Spin targets inside
-            if (platform.userData.targets) {
-              platform.userData.targets.forEach(t => {
+            if (child.userData.targets) {
+              child.userData.targets.forEach(t => {
                 t.rotation.y += 0.05;
                 t.rotation.x += 0.02;
               });
             }
           });
-
           this.stars.rotation.y += 0.0001;
           this.stars.rotation.x += 0.00005;
         }
       });
 
-      // ============================
-      // 3. PROJECTILE (with trail and light)
-      // ============================
+      // 3. PROJECTILE BEHAVIOR (Fully Optimized Memory Pool)
       AFRAME.registerComponent('projectile-behavior', {
         schema: {
-          direction: { type: 'vec3' },
-          speed: { type: 'number', default: 15 } // slightly slower for visibility
+          direction: {type: 'vec3'},
+          speed: {type: 'number', default: 15}
         },
-        init: function () {
-          // Add a point light to the projectile
-          const light = document.createElement('a-light');
-          light.setAttribute('type', 'point');
-          light.setAttribute('color', '#00ffff');
-          light.setAttribute('intensity', '1.5');
-          light.setAttribute('distance', '5');
-          light.setAttribute('decay', '2');
-          this.light = light;
-          this.el.appendChild(light);
-
-          // Simple trail using a second smaller sphere behind
-          const trail = document.createElement('a-entity');
-          trail.setAttribute('geometry', 'primitive: sphere; radius: 0.04');
-          trail.setAttribute('material', 'color: #88ffaa; emissive: #2266aa');
-          trail.setAttribute('position', '-0.1 0 0'); // behind relative to direction? We'll update in tick
-          this.trail = trail;
-          this.el.appendChild(trail);
-
-          this.directionVec = new THREE.Vector3(this.data.direction.x, this.data.direction.y, this.data.direction.z);
+        init: function() {
+          this.system = this.el.sceneEl.systems['game-manager'];
+          this.system.registerProjectile(this.el);
+          
+          // Consultant fix #1: Vector caching to prevent GC stutter
+          this.myPos = new THREE.Vector3();
+          this.targetPos = new THREE.Vector3();
         },
-
-        tick: function (time, timeDelta) {
-          if (!this.el.parentNode) return;
+        remove: function() {
+          if (this.system) this.system.unregisterProjectile(this.el);
+        },
+        tick: function(time, timeDelta) {
+          if (!this.el.parentNode) return; 
 
           const deltaSec = timeDelta / 1000;
-          const pos = this.el.object3D.position;
-          pos.x += this.data.direction.x * this.data.speed * deltaSec;
-          pos.y += this.data.direction.y * this.data.speed * deltaSec;
-          pos.z += this.data.direction.z * this.data.speed * deltaSec;
+          this.el.object3D.position.x += this.data.direction.x * this.data.speed * deltaSec;
+          this.el.object3D.position.y += this.data.direction.y * this.data.speed * deltaSec;
+          this.el.object3D.position.z += this.data.direction.z * this.data.speed * deltaSec;
 
-          // Update trail position: slightly behind along direction
-          if (this.trail) {
-            this.trail.object3D.position.copy(this.directionVec.clone().multiplyScalar(-0.15));
-          }
+          this.el.object3D.getWorldPosition(this.myPos);
 
-          if (pos.length() > 60) {
+          if (this.myPos.length() > 60) {
             this.el.parentNode.removeChild(this.el);
             return;
           }
 
-          // Collision with targets
-          const myPos = pos;
-          if (window.shootableTargets) {
-            for (let i = window.shootableTargets.length - 1; i >= 0; i--) {
-              const t = window.shootableTargets[i];
-              if (!t.parent) {
-                window.shootableTargets.splice(i, 1); 
-                continue;
-              }
+          const targets = this.system.targets;
+          for (let i = targets.length - 1; i >= 0; i--) {
+            const t = targets[i];
+            if (!t.parent) {
+              this.system.unregisterTarget(t);
+              continue;
+            }
+            
+            t.getWorldPosition(this.targetPos);
+            
+            if (this.targetPos.distanceTo(this.myPos) < 0.8) {
+              // Destroy target, spawn explosion, update score
+              this.system.spawnExplosion(this.targetPos);
+              this.system.addScore();
               
-              const targetPos = new THREE.Vector3();
-              t.getWorldPosition(targetPos);
-              
-              if (targetPos.distanceTo(myPos) < 1.0) { // more forgiving
-                // Remove target
-                t.parent.remove(t);
-                window.shootableTargets.splice(i, 1);
-                
-                // Update score
-                const scoreEl = document.getElementById('score');
-                if (scoreEl) {
-                  let val = parseInt(scoreEl.getAttribute('value')) + 1;
-                  scoreEl.setAttribute('value', val);
-                }
-
-                // Haptic feedback on hit (if hands available)
-                tryHapticPulse(0.5, 50);
-
-                // Remove projectile
-                this.el.parentNode.removeChild(this.el);
-                return;
-              }
+              t.parent.remove(t);
+              this.system.unregisterTarget(t);
+              this.el.parentNode.removeChild(this.el);
+              return;
             }
           }
         }
       });
 
-      // Helper for haptic pulses
-      function tryHapticPulse(intensity, duration) {
-        ['leftHand', 'rightHand'].forEach(id => {
-          const hand = document.getElementById(id);
-          if (hand && hand.components['hand-tracking-controls']) {
-            hand.components['hand-tracking-controls'].pulse(intensity, duration);
-          }
-        });
-      }
-
-      // ============================
-      // 4. FRACTAL PARASITE (with death sound/haptics)
-      // ============================
+      // 4. FRACTAL PARASITE BEHAVIOR
       AFRAME.registerComponent('parasite-behavior', {
-        tick: function (time, timeDelta) {
-          const cam = document.querySelector('a-camera');
-          if (!cam) return;
-          const camPos = cam.object3D.position;
-          const myPos = this.el.object3D.position;
+        init: function() {
+          this.system = this.el.sceneEl.systems['game-manager'];
+          this.camera = document.querySelector('a-camera');
           
-          const direction = new THREE.Vector3().subVectors(camPos, myPos).normalize();
+          this.camPos = new THREE.Vector3();
+          this.myPos = new THREE.Vector3();
+          this.direction = new THREE.Vector3();
+          this.pPos = new THREE.Vector3();
+        },
+        tick: function(time, timeDelta) {
+          if (!this.el.parentNode) return;
+
+          this.camera.object3D.getWorldPosition(this.camPos);
+          this.el.object3D.getWorldPosition(this.myPos);
+          
+          this.direction.subVectors(this.camPos, this.myPos).normalize();
           const speed = 1.2;
           const deltaSec = timeDelta / 1000;
 
-          myPos.addScaledVector(direction, speed * deltaSec);
+          this.el.object3D.position.addScaledVector(this.direction, speed * deltaSec);
           this.el.object3D.rotation.x += 0.05;
           this.el.object3D.rotation.y += 0.05;
 
-          // Check collision with projectiles
-          const projectiles = document.querySelectorAll('[projectile-behavior]');
+          // Hit player logic (Consultant fix #6)
+          if (this.myPos.distanceTo(this.camPos) < 0.6) {
+            this.system.takeDamage();
+            this.system.spawnExplosion(this.myPos);
+            this.el.parentNode.removeChild(this.el);
+            return;
+          }
+
+          // Check against optimized projectile array (Consultant fix #14)
+          const projectiles = this.system.projectiles;
           for (let i = 0; i < projectiles.length; i++) {
             const p = projectiles[i];
-            if (p.object3D.position.distanceTo(myPos) < 0.5) {
-              // Remove parasite and projectile
+            p.object3D.getWorldPosition(this.pPos);
+            
+            if (this.pPos.distanceTo(this.myPos) < 0.5) {
+              this.system.spawnExplosion(this.myPos);
+              this.system.addScore();
+              
               this.el.parentNode.removeChild(this.el);
               p.parentNode.removeChild(p);
-              
-              // Score for parasite kill
-              const scoreEl = document.getElementById('score');
-              if (scoreEl) {
-                let val = parseInt(scoreEl.getAttribute('value')) + 2;
-                scoreEl.setAttribute('value', val);
-              }
-
-              tryHapticPulse(0.6, 80);
-              break; 
+              return; 
             }
           }
         }
       });
 
-      // ============================
-      // 5. RIFT MANAGER (fixed event names)
-      // ============================
+      // 5. THE SPATIAL TEAR MANAGER
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
@@ -350,15 +365,17 @@
           this.camera = document.querySelector('a-camera');
           this.lastSpawnTime = 0;
           
-          const leftHand = document.querySelector('#leftHand');
-          const rightHand = document.querySelector('#rightHand');
+          // Wait for DOM to load hand entities safely (Consultant fix #3)
+          this.el.addEventListener('loaded', () => {
+            const leftHand = document.querySelector('#leftHand');
+            const rightHand = document.querySelector('#rightHand');
 
-          // Correct event names: 'pinchstart' and 'pinchend'
-          leftHand.addEventListener('pinchstart', () => this.leftPinching = true);
-          leftHand.addEventListener('pinchend', () => { this.leftPinching = false; this.collapseRift(); });
+            leftHand.addEventListener('pinchstarted', () => this.leftPinching = true);
+            leftHand.addEventListener('pinchended', () => { this.leftPinching = false; this.collapseRift(); });
 
-          rightHand.addEventListener('pinchstart', () => this.rightPinching = true);
-          rightHand.addEventListener('pinchend', () => { this.rightPinching = false; this.collapseRift(); });
+            rightHand.addEventListener('pinchstarted', () => this.rightPinching = true);
+            rightHand.addEventListener('pinchended', () => { this.rightPinching = false; this.collapseRift(); });
+          });
         },
         
         tick: function (time) {
@@ -366,6 +383,8 @@
             const leftEl = document.querySelector('#leftHand');
             const rightEl = document.querySelector('#rightHand');
             
+            if (!leftEl || !rightEl) return;
+
             const leftPos = new THREE.Vector3();
             const rightPos = new THREE.Vector3();
             leftEl.object3D.getWorldPosition(leftPos);
@@ -380,10 +399,10 @@
             this.rift.object3D.scale.set(tearScale, tearScale, 1); 
             this.rift.object3D.visible = true;
             
-            const camPos = this.camera.object3D.position;
+            const camPos = new THREE.Vector3();
+            this.camera.object3D.getWorldPosition(camPos);
             this.rift.object3D.lookAt(camPos);
 
-            // Spawn parasites when rift is large enough
             if (tearScale > 1.0 && time - this.lastSpawnTime > 800) {
               this.spawnParasite(midPoint);
               this.lastSpawnTime = time;
@@ -393,7 +412,7 @@
 
         spawnParasite: function(position) {
           const parasite = document.createElement('a-entity');
-          parasite.setAttribute('geometry', 'primitive: octahedron; radius: 0.2');
+          parasite.setAttribute('geometry', 'primitive: octahedron; radius: 0.15');
           parasite.setAttribute('material', 'color: #ff0044; wireframe: true');
           parasite.setAttribute('position', `${position.x} ${position.y} ${position.z + 0.2}`);
           parasite.setAttribute('parasite-behavior', '');
@@ -406,35 +425,37 @@
         }
       });
 
-      // ============================
-      // 6. HAND CANNON (fixed laser, improved pose detection)
-      // ============================
+      // 6. THE SKELETAL HAND CANNON 
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.cooldown = false;
           this.camera = document.querySelector('a-camera');
 
-          // Gun mesh (small cylinder at palm)
           this.gunMesh = document.createElement('a-entity');
           this.gunMesh.setAttribute('geometry', 'primitive: cylinder; radius: 0.01; height: 0.15');
           this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
           this.gunMesh.setAttribute('rotation', '90 0 0');
           this.el.appendChild(this.gunMesh);
 
-          // LASER POINTER (FIXED ORIENTATION)
-          // Create a cylinder that extends forward from the tip
+          // Consultant fix #10: Muzzle Flash
+          this.muzzleFlash = document.createElement('a-entity');
+          this.muzzleFlash.setAttribute('geometry', 'primitive: sphere; radius: 0.05');
+          this.muzzleFlash.setAttribute('material', 'color: #ffffff; shader: flat');
+          this.muzzleFlash.setAttribute('position', '0 0.1 0'); // Top of the barrel
+          this.muzzleFlash.setAttribute('visible', 'false');
+          this.gunMesh.appendChild(this.muzzleFlash);
+
           this.laser = document.createElement('a-entity');
           this.laser.setAttribute('geometry', 'primitive: cylinder; radius: 0.003; height: 20');
-          this.laser.setAttribute('material', 'color: #ff0044; shader: flat; transparent: true; opacity: 0.6');
-          this.laser.setAttribute('rotation', '90 0 0'); // align cylinder with Z
-          this.laser.setAttribute('position', '0 0 10'); // center at half length, so base at 0, tip at 20
-
+          this.laser.setAttribute('material', 'color: #ff0044; shader: flat; transparent: true; opacity: 0.5');
+          this.laser.setAttribute('rotation', '90 0 0'); 
+          this.laser.setAttribute('position', '0 0 -10'); 
+          
           this.laserPivot = document.createElement('a-entity');
           this.laserPivot.appendChild(this.laser);
           this.laserPivot.setAttribute('visible', false);
           this.el.appendChild(this.laserPivot);
 
-          // For hand coloring
           this.handMesh = null;
           this.defaultColor = null;
           this.el.addEventListener('model-loaded', () => {
@@ -452,48 +473,40 @@
         },
         
         tick: function (time, timeDelta) {
-          const tracking = this.el.components['hand-tracking-controls'];
-          if (!tracking || !tracking.bones || tracking.bones.length === 0) return;
+          const trackingComponent = this.el.components['hand-tracking-controls'];
+          if (!trackingComponent || !trackingComponent.bones || trackingComponent.bones.length === 0) return;
 
-          const bones = tracking.bones;
+          const bones = trackingComponent.bones;
           
-          // Bone indices (typical for Oculus hand model)
-          const wrist = bones[0];
-          const thumbTip = bones[4];
-          const indexBase = bones[5];
-          const indexTip = bones[9];
-          const middleTip = bones[14];
+          const wristPos = new THREE.Vector3();
+          const thumbTipPos = new THREE.Vector3();
+          const indexBasePos = new THREE.Vector3();
+          const indexTipPos = new THREE.Vector3();
+          const middleTipPos = new THREE.Vector3();
 
-          if (!wrist || !thumbTip || !indexBase || !indexTip || !middleTip) return;
+          bones[0].getWorldPosition(wristPos);
+          bones[4].getWorldPosition(thumbTipPos);
+          bones[5].getWorldPosition(indexBasePos);
+          bones[9].getWorldPosition(indexTipPos);
+          bones[14].getWorldPosition(middleTipPos);
 
-          const wristPos = wrist.getWorldPosition(new THREE.Vector3());
-          const thumbTipPos = thumbTip.getWorldPosition(new THREE.Vector3());
-          const indexBasePos = indexBase.getWorldPosition(new THREE.Vector3());
-          const indexTipPos = indexTip.getWorldPosition(new THREE.Vector3());
-          const middleTipPos = middleTip.getWorldPosition(new THREE.Vector3());
-
-          // Aim direction: from wrist to index tip (pointing)
           const aimDirection = new THREE.Vector3().subVectors(indexTipPos, wristPos).normalize();
 
-          // Position gun mesh near index base
           this.gunMesh.object3D.position.copy(indexBasePos);
           this.gunMesh.object3D.position.y += 0.02; 
           this.gunMesh.object3D.lookAt(indexTipPos);
 
-          // Gun pose detection: middle finger curled (tip closer to wrist than index tip)
-          const indexLen = indexTipPos.distanceTo(wristPos);
-          const middleLen = middleTipPos.distanceTo(wristPos);
-          const isGunPose = middleLen < indexLen * 0.8; 
+          const indexLength = indexTipPos.distanceTo(wristPos);
+          const midLength = middleTipPos.distanceTo(wristPos);
+          const isGunPose = (midLength < indexLength * 0.75);
 
           if (isGunPose) {
-            // Show laser
             this.laserPivot.setAttribute('visible', true);
             this.laserPivot.object3D.position.copy(indexTipPos);
-            // Point laser forward
-            const targetPoint = indexTipPos.clone().add(aimDirection);
+            
+            const targetPoint = new THREE.Vector3().copy(indexTipPos).add(aimDirection);
             this.laserPivot.object3D.lookAt(targetPoint);
 
-            // Color hand
             if (this.handMesh) {
               const hue = (time % 2000) / 2000;
               this.handMesh.material.color.setHSL(hue, 1.0, 0.5);
@@ -509,9 +522,9 @@
 
           if (this.cooldown) return;
 
-          // Fire when thumb tip touches index base
           const hammerDistance = thumbTipPos.distanceTo(indexBasePos);
-          if (isGunPose && hammerDistance < 0.05) { 
+          
+          if (isGunPose && hammerDistance < 0.045) { 
             this.fireCannon(indexTipPos, aimDirection);
           }
         },
@@ -519,48 +532,49 @@
         fireCannon: function(originPos, aimVector) {
           this.cooldown = true;
           this.gunMesh.setAttribute('material', 'color: #ffffff; wireframe: false');
+          this.muzzleFlash.setAttribute('visible', 'true');
 
-          // Create projectile
           const projectile = document.createElement('a-entity');
-          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.1');
-          projectile.setAttribute('material', 'color: #00ffcc; emissive: #006688');
+          
+          // Consultant fix #9: Projectile trail (Stretched sphere aligns perfectly to velocity)
+          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.06');
+          projectile.setAttribute('material', 'color: #00ffcc; shader: flat');
           projectile.setAttribute('position', originPos);
-          projectile.setAttribute('projectile-behavior', `direction: ${aimVector.x} ${aimVector.y} ${aimVector.z}`);
+          
+          // Stretch it along the Z axis to create a blaster bolt
+          projectile.object3D.scale.set(1, 1, 4);
+          const alignmentPoint = new THREE.Vector3().copy(originPos).add(aimVector);
+          projectile.object3D.lookAt(alignmentPoint);
 
-          // Add a point light to projectile (done in its component)
+          projectile.setAttribute('projectile-behavior', `direction: ${aimVector.x} ${aimVector.y} ${aimVector.z}`);
           this.el.sceneEl.appendChild(projectile);
 
-          // Haptic feedback
-          tryHapticPulse(0.3, 30);
-
-          // Cooldown visual
           setTimeout(() => { 
             this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
+            this.muzzleFlash.setAttribute('visible', 'false');
             this.cooldown = false; 
-          }, 250);
+          }, 300);
         }
       });
     </script>
   </head>
   <body>
-    <a-scene webxr="optionalFeatures: hand-tracking;" floating-level rift-manager>
+    <!-- The Game Manager sits at the root to process events cleanly -->
+    <a-scene webxr="optionalFeatures: hand-tracking;" floating-level rift-manager game-manager>
 
-      <!-- UI: Score display -->
-      <a-text id="score" value="0" position="-1 2 -3" scale="2 2 2" color="#00ffcc" align="center" 
-              font="mozillavr" side="double" anchor="center" baseline="center"></a-text>
-      <a-text value="Pinch both hands to open rift. Make gun pose (index up, thumb near base) to fire." 
-              position="0 1.5 -2" scale="0.8 0.8 0.8" color="#88aaff" align="center" width="6"></a-text>
-
-      <!-- Dimensional rift plane -->
       <a-entity id="dimensional-rift" 
                 geometry="primitive: plane; width: 1; height: 1" 
                 material="shader: rift-void; transparent: true; side: double; depthWrite: false" 
                 visible="false">
       </a-entity>
 
-      <!-- Camera rig with both hands -->
       <a-entity id="rig" position="0 3.5 0">
-        <a-camera position="0 1.6 0"></a-camera>
+        <!-- Consultant fix #4 & #6: HUD and Damage overlay slaved directly to the user's face -->
+        <a-camera position="0 1.6 0">
+          <a-text id="score-display" value="SCORE: 0" position="0 -0.2 -1" align="center" width="2" color="#00ffcc" font="monoid"></a-text>
+          <a-plane id="damage-overlay" position="0 0 -0.5" width="4" height="4" material="color: #ff0000; transparent: true; opacity: 0; shader: flat" depth-test="false"></a-plane>
+        </a-camera>
+        
         <a-entity id="leftHand" hand-tracking-controls="hand: left;" hand-cannon></a-entity>
         <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon></a-entity>
       </a-entity>
