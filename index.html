@@ -1,260 +1,456 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title>WebXR: Relativistic Finger Gun Template</title>
-    <!-- Stable A-Frame release for WebXR Hand Tracking -->
-    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
-    
-    <script>
-      // 0. GAME MANAGER (Clean entity tracking, no messy global variables)
-      AFRAME.registerSystem('game-manager', {
-        init: function() {
-          this.targets = [];
-        },
-        registerTarget: function(t) { this.targets.push(t); },
-        unregisterTarget: function(t) {
-          const idx = this.targets.indexOf(t);
-          if (idx > -1) this.targets.splice(idx, 1);
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High Fidelity WebXR - Orange Room</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
         }
-      });
-
-      // Simple component to attach to any object you want to blow up
-      AFRAME.registerComponent('shootable-target', {
-        init: function() {
-          this.system = this.el.sceneEl.systems['game-manager'];
-          this.system.registerTarget(this.el);
-        },
-        remove: function() {
-          if (this.system) this.system.unregisterTarget(this.el);
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.8) 100%);
+            pointer-events: none;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            padding-top: 10vh;
         }
-      });
-
-      // 1. PROJECTILE SYSTEM (Now with collision and explosions)
-      AFRAME.registerComponent('projectile-behavior', {
-        schema: {
-          direction: {type: 'vec3'},
-          speed: {type: 'number', default: 10} // Slowed down for visual tracking
-        },
-        init: function() {
-          this.system = this.el.sceneEl.systems['game-manager'];
-          this.myPos = new THREE.Vector3();
-          this.tPos = new THREE.Vector3();
-
-          // Self-destruct timer so we don't leak memory if it flies into the void
-          this.lifeTimer = setTimeout(() => {
-            if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
-          }, 4000); 
-        },
-        tick: function(time, timeDelta) {
-          if (!this.el.parentNode) return; 
-
-          const deltaSec = timeDelta / 1000;
-          this.el.object3D.position.x += this.data.direction.x * this.data.speed * deltaSec;
-          this.el.object3D.position.y += this.data.direction.y * this.data.speed * deltaSec;
-          this.el.object3D.position.z += this.data.direction.z * this.data.speed * deltaSec;
-
-          this.el.object3D.getWorldPosition(this.myPos);
-
-          // Collision Detection Loop
-          const targets = this.system.targets;
-          for (let i = targets.length - 1; i >= 0; i--) {
-            const t = targets[i];
-            if (!t.parentNode) continue;
-            
-            t.object3D.getWorldPosition(this.tPos);
-            
-            // Hitbox radius: 0.6 meters
-            if (this.myPos.distanceTo(this.tPos) < 0.6) {
-              // Spawn explosion effect
-              const flash = document.createElement('a-entity');
-              flash.setAttribute('geometry', 'primitive: sphere; radius: 0.3');
-              flash.setAttribute('material', 'color: #ffaa00; shader: flat; transparent: true');
-              flash.setAttribute('position', this.tPos);
-              flash.setAttribute('animation__scale', 'property: scale; to: 2 2 2; dur: 200; easing: easeOutQuad');
-              flash.setAttribute('animation__fade', 'property: material.opacity; to: 0; dur: 200; easing: easeOutQuad');
-              this.el.sceneEl.appendChild(flash);
-              
-              // Clean up flash
-              setTimeout(() => { if (flash.parentNode) flash.parentNode.removeChild(flash); }, 250);
-
-              // Destroy target and projectile
-              t.parentNode.removeChild(t);
-              this.el.parentNode.removeChild(this.el);
-              return; // Stop processing this projectile
-            }
-          }
-        },
-        remove: function() {
-          clearTimeout(this.lifeTimer);
+        h1 {
+            color: #fff;
+            font-weight: 300;
+            letter-spacing: 2px;
+            margin: 0 0 10px 0;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
         }
-      });
-
-      // 2. THE RELATIVISTIC FINGER GUN
-      AFRAME.registerComponent('finger-gun', {
-        init: function () {
-          this.state = 'DISARMED'; 
-          
-          this.laser = document.createElement('a-entity');
-          this.laser.setAttribute('geometry', 'primitive: cylinder; radius: 0.002; height: 10');
-          this.laser.setAttribute('material', 'color: #ff0000; shader: flat; transparent: true; opacity: 0.6');
-          this.laser.setAttribute('rotation', '90 0 0'); 
-          this.laser.setAttribute('position', '0 0 -5'); 
-          
-          this.laserPivot = document.createElement('a-entity');
-          this.laserPivot.appendChild(this.laser);
-          this.el.appendChild(this.laserPivot);
-
-          this.muzzleFlash = document.createElement('a-entity');
-          this.muzzleFlash.setAttribute('geometry', 'primitive: sphere; radius: 0.06');
-          this.muzzleFlash.setAttribute('material', 'color: #ffffff; shader: flat');
-          this.muzzleFlash.setAttribute('visible', 'false');
-          this.el.appendChild(this.muzzleFlash);
-
-          this.vWrist = new THREE.Vector3();
-          this.vThumbTip = new THREE.Vector3();
-          this.vIndexBase = new THREE.Vector3();
-          this.vIndexTip = new THREE.Vector3();
-          this.vMidTip = new THREE.Vector3();
-          this.vRingTip = new THREE.Vector3();
-          this.vPinkyTip = new THREE.Vector3();
-
-          // Mesh Hijacker for Rainbow Effect
-          this.handMesh = null;
-          this.defaultColor = null;
-          this.el.addEventListener('model-loaded', () => {
-            const mesh = this.el.getObject3D('mesh');
-            if (mesh) {
-              mesh.traverse((node) => {
-                if (node.isMesh && node.material) {
-                  this.handMesh = node;
-                  // Clone it so the left and right hands don't share the exact same material instance
-                  this.handMesh.material = node.material.clone(); 
-                  this.defaultColor = this.handMesh.material.color.clone();
-                }
-              });
-            }
-          });
-        },
-        
-        tick: function (time, timeDelta) {
-          const tracking = this.el.components['hand-tracking-controls'];
-          if (!tracking || !tracking.bones || tracking.bones.length === 0) return;
-
-          const bones = tracking.bones;
-          
-          bones[0].getWorldPosition(this.vWrist);
-          bones[4].getWorldPosition(this.vThumbTip);
-          bones[5].getWorldPosition(this.vIndexBase);
-          bones[9].getWorldPosition(this.vIndexTip);
-          bones[14].getWorldPosition(this.vMidTip);
-          bones[19].getWorldPosition(this.vRingTip);
-          bones[24].getWorldPosition(this.vPinkyTip);
-
-          const aimDirection = new THREE.Vector3().subVectors(this.vIndexTip, this.vIndexBase).normalize();
-
-          this.laserPivot.object3D.position.copy(this.vIndexTip);
-          const targetPoint = new THREE.Vector3().copy(this.vIndexTip).add(aimDirection);
-          this.laserPivot.object3D.lookAt(targetPoint);
-          this.muzzleFlash.object3D.position.copy(this.vIndexTip);
-
-          const baseUnit = this.vWrist.distanceTo(this.vIndexBase);
-
-          const lenIndex = this.vIndexTip.distanceTo(this.vWrist);
-          const lenMid = this.vMidTip.distanceTo(this.vWrist);
-          const lenRing = this.vRingTip.distanceTo(this.vWrist);
-          const lenPinky = this.vPinkyTip.distanceTo(this.vWrist);
-
-          const isGunPose = (
-            lenIndex > baseUnit * 1.5 && 
-            lenMid > baseUnit * 1.5 && 
-            lenRing < baseUnit * 1.3 && 
-            lenPinky < baseUnit * 1.3
-          );
-
-          const thumbDistance = this.vThumbTip.distanceTo(this.vIndexBase);
-          
-          const isThumbCocked = thumbDistance > baseUnit * 0.8;
-          const isThumbDropped = thumbDistance < baseUnit * 0.65;
-
-          // RAINBOW ACTIVATION LOGIC
-          if (isGunPose && this.handMesh) {
-            const hue = (time % 2000) / 2000;
-            this.handMesh.material.color.setHSL(hue, 1.0, 0.5);
-            this.handMesh.material.emissive.setHSL(hue, 1.0, 0.2); // Makes it glow slightly
-          } else if (!isGunPose && this.handMesh && this.defaultColor) {
-            this.handMesh.material.color.copy(this.defaultColor);
-            this.handMesh.material.emissive.setHex(0x000000);
-          }
-
-          // FIRING STATE MACHINE LOGIC
-          if (!isGunPose) {
-            this.state = 'DISARMED';
-            this.laser.setAttribute('material', 'color: #ff0000'); 
-            this.laser.setAttribute('visible', 'true');
-            return;
-          }
-
-          if (this.state === 'DISARMED' && isThumbCocked) {
-            this.state = 'ARMED';
-          } else if (this.state === 'COOLDOWN' && isThumbCocked) {
-            this.state = 'ARMED'; 
-          }
-
-          if (this.state === 'ARMED') {
-            this.laser.setAttribute('material', 'color: #00ff00'); 
-            
-            if (isThumbDropped) {
-              this.fire(aimDirection);
-              this.state = 'COOLDOWN';
-            }
-          } else if (this.state === 'COOLDOWN') {
-            this.laser.setAttribute('material', 'color: #ffff00'); 
-          }
-        },
-
-        fire: function(aimVector) {
-          this.muzzleFlash.setAttribute('visible', 'true');
-          setTimeout(() => { this.muzzleFlash.setAttribute('visible', 'false'); }, 50);
-
-          const projectile = document.createElement('a-entity');
-          // Made it significantly larger and brighter so it cannot be missed
-          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.1');
-          projectile.setAttribute('material', 'color: #00ffff; emissive: #00ffff; emissiveIntensity: 1; shader: flat');
-          projectile.setAttribute('position', this.vIndexTip); 
-          
-          projectile.object3D.scale.set(1, 1, 3);
-          const alignTarget = new THREE.Vector3().copy(this.vIndexTip).add(aimVector);
-          projectile.object3D.lookAt(alignTarget);
-
-          projectile.setAttribute('projectile-behavior', `direction: ${aimVector.x} ${aimVector.y} ${aimVector.z}`);
-          this.el.sceneEl.appendChild(projectile);
-          
-          console.log("Telemetry normal. Payload delivered.");
+        p {
+            color: #ccc;
+            margin: 0;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
         }
-      });
+    </style>
+    <!-- Import maps polyfill -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
     </script>
-  </head>
-  <body>
-    <!-- Added game-manager to the scene -->
-    <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #111111" game-manager>
-      
-      <!-- Spatial reference floor -->
-      <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222222" material="wireframe: true"></a-plane>
+</head>
+<body>
+    <div id="overlay">
+        <h1>THE ORANGE ROOM</h1>
+        <p>Drag to look around. Click "ENTER VR" to immerse yourself.</p>
+        <p style="margin-top: 5px; font-size: 0.85em; color: #888;">(Use Left Thumbstick to Move, Right Thumbstick to Turn)</p>
+    </div>
 
-      <!-- TARGET SPAWNER -->
-      <a-entity id="target-range">
-        <a-box position="-2 1.5 -5" color="#ff0055" shootable-target animation="property: rotation; to: 360 360 0; loop: true; dur: 3000; easing: linear"></a-box>
-        <a-box position="0 1.5 -5" color="#ff0055" shootable-target animation="property: rotation; to: 360 360 0; loop: true; dur: 4000; easing: linear"></a-box>
-        <a-box position="2 1.5 -5" color="#ff0055" shootable-target animation="property: rotation; to: 360 360 0; loop: true; dur: 5000; easing: linear"></a-box>
-      </a-entity>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-      <a-entity id="rig" position="0 0 0">
-        <a-camera position="0 1.6 0"></a-camera>
-        
-        <a-entity id="leftHand" hand-tracking-controls="hand: left;" finger-gun></a-entity>
-        <a-entity id="rightHand" hand-tracking-controls="hand: right;" finger-gun></a-entity>
-      </a-entity>
+        let camera, scene, renderer;
+        let controls;
+        let group; 
+        const objects = [];
+        let dust;
 
-    </a-scene>
-  </body>
+        // VR Controllers & Locomotion State
+        let controller1, controller2;
+        let controllerGrip1, controllerGrip2;
+        let isSnapTurning = false;
+
+        init();
+        animate();
+
+        function init() {
+            const container = document.createElement( 'div' );
+            document.body.appendChild( container );
+
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color( 0x050505 );
+            scene.fog = new THREE.Fog(0x050505, 5, 20);
+
+            // Camera & Locomotion Group Setup
+            camera = new THREE.PerspectiveCamera( 55, window.innerWidth / window.innerHeight, 0.1, 100 );
+            camera.position.set( 0, 1.6, 2 );
+
+            group = new THREE.Group();
+            scene.add(group);
+            group.add(camera);
+
+            // High Fidelity Renderer Setup
+            renderer = new THREE.WebGLRenderer( { antialias: true, powerPreference: "high-performance" } );
+            renderer.setPixelRatio( window.devicePixelRatio );
+            renderer.setSize( window.innerWidth, window.innerHeight );
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping; // Photorealistic tone mapping
+            renderer.toneMappingExposure = 1.2;
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Soft shadow edges
+            renderer.xr.enabled = true;
+            container.appendChild( renderer.domElement );
+
+            // Image Based Lighting (IBL) via RoomEnvironment
+            const pmremGenerator = new THREE.PMREMGenerator( renderer );
+            pmremGenerator.compileEquirectangularShader();
+            scene.environment = pmremGenerator.fromScene( new RoomEnvironment(), 0.04 ).texture;
+
+            // Lights
+            const ambient = new THREE.AmbientLight(0xffffff, 0.2);
+            scene.add(ambient);
+
+            // Simulating sunlight coming through the window
+            const sunLight = new THREE.DirectionalLight(0xffebd6, 3.5);
+            sunLight.position.set(10, 6, -2);
+            sunLight.target.position.set(0, 0, -3);
+            sunLight.castShadow = true;
+            sunLight.shadow.camera.top = 6;
+            sunLight.shadow.camera.bottom = -6;
+            sunLight.shadow.camera.left = -6;
+            sunLight.shadow.camera.right = 6;
+            sunLight.shadow.camera.near = 0.1;
+            sunLight.shadow.camera.far = 25;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.bias = -0.0002;
+            scene.add(sunLight);
+            scene.add(sunLight.target);
+
+            // Add VR Entry Button
+            document.body.appendChild( VRButton.createButton( renderer ) );
+
+            // Desktop orbit controls
+            controls = new OrbitControls( camera, renderer.domElement );
+            controls.target.set( 0, 1.2, -3 );
+            controls.update();
+
+            buildArchitecture();
+            buildArtAndFurniture();
+            setupVRControllers();
+
+            window.addEventListener( 'resize', onWindowResize );
+        }
+
+        function buildArchitecture() {
+            // Highly reflective polished concrete floor
+            const floorMat = new THREE.MeshStandardMaterial({
+                color: 0x080808,
+                roughness: 0.08, 
+                metalness: 0.2
+            });
+            const floor = new THREE.Mesh( new THREE.PlaneGeometry( 12, 12 ), floorMat );
+            floor.rotation.x = - Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add( floor );
+
+            // Ceiling
+            const ceilMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.9 });
+            const ceiling = new THREE.Mesh( new THREE.PlaneGeometry( 12, 12 ), ceilMat );
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 4;
+            ceiling.receiveShadow = true;
+            scene.add( ceiling );
+
+            // Walls
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.8 });
+            
+            // The "Orange Room" Feature Wall
+            const orangeMat = new THREE.MeshStandardMaterial({ color: 0xd94b18, roughness: 0.7 });
+            const backWall = new THREE.Mesh( new THREE.PlaneGeometry(12, 4), orangeMat );
+            backWall.position.set(0, 2, -6);
+            backWall.receiveShadow = true;
+            scene.add(backWall);
+
+            // Front Wall
+            const frontWall = new THREE.Mesh( new THREE.PlaneGeometry(12, 4), wallMat );
+            frontWall.position.set(0, 2, 6);
+            frontWall.rotation.y = Math.PI;
+            frontWall.receiveShadow = true;
+            scene.add(frontWall);
+
+            // Left Wall
+            const leftWall = new THREE.Mesh( new THREE.PlaneGeometry(12, 4), wallMat );
+            leftWall.position.set(-6, 2, 0);
+            leftWall.rotation.y = Math.PI / 2;
+            leftWall.receiveShadow = true;
+            scene.add(leftWall);
+
+            // Right Wall (with Window cutout)
+            const rightWallGroup = new THREE.Group();
+            
+            const wallBack = new THREE.Mesh( new THREE.PlaneGeometry(4, 4), wallMat );
+            wallBack.position.set(6, 2, -4);
+            wallBack.rotation.y = -Math.PI / 2;
+            wallBack.receiveShadow = true;
+            rightWallGroup.add(wallBack);
+
+            const wallFront = new THREE.Mesh( new THREE.PlaneGeometry(4, 4), wallMat );
+            wallFront.position.set(6, 2, 4);
+            wallFront.rotation.y = -Math.PI / 2;
+            wallFront.receiveShadow = true;
+            rightWallGroup.add(wallFront);
+
+            const wallTop = new THREE.Mesh( new THREE.PlaneGeometry(4, 1), wallMat );
+            wallTop.position.set(6, 3.5, 0);
+            wallTop.rotation.y = -Math.PI / 2;
+            wallTop.receiveShadow = true;
+            rightWallGroup.add(wallTop);
+
+            const wallBottom = new THREE.Mesh( new THREE.PlaneGeometry(4, 1), wallMat );
+            wallBottom.position.set(6, 0.5, 0);
+            wallBottom.rotation.y = -Math.PI / 2;
+            wallBottom.receiveShadow = true;
+            rightWallGroup.add(wallBottom);
+
+            // Window Frames (Mullions)
+            const frameMat = new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.3, metalness: 0.5});
+            const frameV = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.0, 0.1), frameMat);
+            frameV.position.set(5.95, 2, 0); 
+            frameV.castShadow = true;
+            rightWallGroup.add(frameV);
+
+            const frameH = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 4), frameMat);
+            frameH.position.set(5.95, 2, 0); 
+            frameH.castShadow = true;
+            rightWallGroup.add(frameH);
+
+            scene.add(rightWallGroup);
+        }
+
+        function buildArtAndFurniture() {
+            // Sculpture 1: Brilliant Gold Torus
+            const torusGeo = new THREE.TorusKnotGeometry(0.45, 0.12, 200, 32);
+            const goldMat = new THREE.MeshStandardMaterial({ 
+                color: 0xffa420, 
+                roughness: 0.1, 
+                metalness: 1.0,
+                envMapIntensity: 2.0 
+            });
+            const torus = new THREE.Mesh(torusGeo, goldMat);
+            torus.position.set(0, 1.8, -3);
+            torus.castShadow = true;
+            torus.receiveShadow = true;
+            scene.add(torus);
+            objects.push({ mesh: torus, type: 'rotate' });
+
+            const plinth1 = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 32), new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.4}));
+            plinth1.position.set(0, 0.6, -3);
+            plinth1.castShadow = true;
+            plinth1.receiveShadow = true;
+            scene.add(plinth1);
+
+            // Sculpture 2: Thick Floating Glass Sphere
+            const glassGeo = new THREE.SphereGeometry(0.4, 64, 64);
+            const glassMat = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                metalness: 0.05,
+                roughness: 0.0,
+                transmission: 1.0, 
+                ior: 1.6,
+                thickness: 1.5,
+                envMapIntensity: 1.5,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.05
+            });
+            const sphere = new THREE.Mesh(glassGeo, glassMat);
+            sphere.position.set(-2.5, 1.6, -2);
+            sphere.castShadow = true;
+            sphere.receiveShadow = true;
+            scene.add(sphere);
+            objects.push({ mesh: sphere, type: 'float', initY: 1.6 });
+
+            const plinth2 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.0, 0.6), new THREE.MeshStandardMaterial({color: 0xcccccc, roughness: 0.8}));
+            plinth2.position.set(-2.5, 0.5, -2);
+            plinth2.castShadow = true;
+            plinth2.receiveShadow = true;
+            scene.add(plinth2);
+
+            // Sculpture 3: Dark Chrome Abstract Shape
+            const isoGeo = new THREE.IcosahedronGeometry(0.35, 0);
+            const chromeMat = new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.0, metalness: 1.0, envMapIntensity: 1.5});
+            const iso = new THREE.Mesh(isoGeo, chromeMat);
+            iso.position.set(2.5, 1.5, -2);
+            iso.castShadow = true;
+            iso.receiveShadow = true;
+            scene.add(iso);
+            objects.push({ mesh: iso, type: 'rotate-fast' });
+
+            const plinth3 = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.9, 6), new THREE.MeshStandardMaterial({color: 0x444444, roughness: 0.6}));
+            plinth3.position.set(2.5, 0.45, -2);
+            plinth3.castShadow = true;
+            plinth3.receiveShadow = true;
+            scene.add(plinth3);
+
+            // Dynamic Abstract Canvas Art on Left Wall
+            const canvasCanvas = document.createElement('canvas');
+            canvasCanvas.width = 1024;
+            canvasCanvas.height = 512;
+            const ctx = canvasCanvas.getContext('2d');
+            
+            const grad = ctx.createLinearGradient(0,0,1024,512);
+            grad.addColorStop(0, "#d94b18"); // matches orange wall
+            grad.addColorStop(0.5, "#222222");
+            grad.addColorStop(1, "#0a0a0a"); 
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,1024,512);
+            
+            ctx.fillStyle = "#ffffff";
+            ctx.beginPath();
+            ctx.arc(768, 256, 120, 0, Math.PI*2);
+            ctx.fill();
+
+            const paintingTex = new THREE.CanvasTexture(canvasCanvas);
+            const paintingMat = new THREE.MeshStandardMaterial({ map: paintingTex, roughness: 0.9 });
+            const painting = new THREE.Mesh(new THREE.PlaneGeometry( 5, 2.5 ), paintingMat);
+            painting.position.set(-5.9, 2.2, -2);
+            painting.rotation.y = Math.PI / 2;
+            painting.receiveShadow = true;
+            scene.add(painting);
+
+            // Ambient Dust Particles for Depth and Realism
+            const dustGeo = new THREE.BufferGeometry();
+            const dustCount = 800;
+            const positions = new Float32Array(dustCount * 3);
+            for(let i=0; i < dustCount * 3; i++) {
+                positions[i] = (Math.random() - 0.5) * 11;
+            }
+            dustGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const dustMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.02, transparent: true, opacity: 0.25, depthWrite: false });
+            dust = new THREE.Points(dustGeo, dustMat);
+            dust.position.y = 2;
+            scene.add(dust);
+        }
+
+        function setupVRControllers() {
+            const controllerModelFactory = new XRControllerModelFactory();
+
+            // Right/Left Hand Pointers
+            controller1 = renderer.xr.getController( 0 );
+            group.add( controller1 );
+            controller2 = renderer.xr.getController( 1 );
+            group.add( controller2 );
+
+            // Realistic Grip Models
+            controllerGrip1 = renderer.xr.getControllerGrip( 0 );
+            controllerGrip1.add( controllerModelFactory.createControllerModel( controllerGrip1 ) );
+            group.add( controllerGrip1 );
+
+            controllerGrip2 = renderer.xr.getControllerGrip( 1 );
+            controllerGrip2.add( controllerModelFactory.createControllerModel( controllerGrip2 ) );
+            group.add( controllerGrip2 );
+
+            // Add subtle laser lines
+            const geometry = new THREE.BufferGeometry().setFromPoints( [ new THREE.Vector3( 0, 0, 0 ), new THREE.Vector3( 0, 0, - 1 ) ] );
+            const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+            const line = new THREE.Line( geometry, lineMat );
+            line.scale.z = 2;
+
+            controller1.add( line.clone() );
+            controller2.add( line.clone() );
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize( window.innerWidth, window.innerHeight );
+        }
+
+        function handleLocomotion() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+
+            for (const source of session.inputSources) {
+                if (source.gamepad) {
+                    const axes = source.gamepad.axes;
+
+                    // Left Hand - Smooth Locomotion
+                    if (source.handedness === 'left' && axes.length >= 4) {
+                        const x = axes[2]; // Left/Right
+                        const y = axes[3]; // Forward/Backward
+
+                        // Deadzone filtering
+                        if (Math.abs(x) > 0.1 || Math.abs(y) > 0.1) {
+                            const direction = new THREE.Vector3(x, 0, y);
+                            // Move relative to the headset's looking direction
+                            const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+                            direction.applyEuler(new THREE.Euler(0, euler.y, 0));
+                            
+                            group.position.addScaledVector(direction, 0.04);
+                        }
+                    }
+
+                    // Right Hand - Snap Turning
+                    if (source.handedness === 'right' && axes.length >= 4) {
+                        const x = axes[2];
+                        if (Math.abs(x) > 0.5) {
+                            if (!isSnapTurning) {
+                                group.rotation.y -= Math.sign(x) * (Math.PI / 4); // 45 degree snap
+                                isSnapTurning = true;
+                            }
+                        } else {
+                            isSnapTurning = false; // Reset when stick returns to center
+                        }
+                    }
+                }
+            }
+
+            // Boundary collision so players can't walk through walls
+            const bound = 5.2;
+            group.position.x = Math.max(-bound, Math.min(bound, group.position.x));
+            group.position.z = Math.max(-bound, Math.min(bound, group.position.z));
+        }
+
+        function animate() {
+            renderer.setAnimationLoop( render );
+        }
+
+        function render(time) {
+            const timeSec = time * 0.001;
+
+            // Animate Art Sculptures
+            objects.forEach(obj => {
+                if (obj.type === 'rotate') {
+                    obj.mesh.rotation.x = timeSec * 0.4;
+                    obj.mesh.rotation.y = timeSec * 0.6;
+                } else if (obj.type === 'float') {
+                    obj.mesh.position.y = obj.initY + Math.sin(timeSec * 2) * 0.08;
+                    obj.mesh.rotation.y = timeSec * 0.3;
+                } else if (obj.type === 'rotate-fast') {
+                    obj.mesh.rotation.x = timeSec * 0.9;
+                    obj.mesh.rotation.y = timeSec * 1.2;
+                }
+            });
+
+            // Animate Dust Particles
+            if(dust) {
+                dust.rotation.y += 0.0005;
+                dust.rotation.x += 0.0002;
+            }
+
+            // Handle VR Locomotion Input
+            if ( renderer.xr.isPresenting ) {
+                handleLocomotion();
+            }
+
+            renderer.render( scene, camera );
+        }
+    </script>
+</body>
 </html>
