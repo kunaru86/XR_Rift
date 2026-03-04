@@ -46,7 +46,7 @@
 </head>
 <body>
     <div id="info">
-        Echo Weaver: Phase 5 (The Swarm)<br/>Match Ammo to Spells. 5 Blue + Line = UNIBEAM. Drop hand to a fist to vent Ammo.
+        Echo Weaver: Phase 5 (The Swarm)<br/>Match Ammo to Spells. 5 Blue + Line = UNIBEAM. Drop hand to a fist to vent Ammo.<br/><strong>Extend Thumb & Pinky (Shaka) to view Tactical HUD.</strong>
         <div id="stats">Wave: 1 | Cap: 0/5 | Ammo: <span class="ammo-blue">B:0</span> <span class="ammo-orange">O:0</span> <span class="ammo-purple">P:0</span> | Kills: 0</div>
     </div>
     <div id="wave-announce">WAVE 1</div>
@@ -63,6 +63,9 @@
         let enemies = []; 
         const hands = [null, null]; 
         
+        // --- Holographic HUD Globals ---
+        let hudMesh, hudCanvas, hudCtx, hudTexture;
+
         // --- Settings & Progression ---
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
@@ -289,6 +292,20 @@
                 lockReticles.push(reticle);
             }
 
+            // --- Holographic Tactical HUD Setup ---
+            hudCanvas = document.createElement('canvas');
+            hudCanvas.width = 512;
+            hudCanvas.height = 512;
+            hudCtx = hudCanvas.getContext('2d');
+            hudTexture = new THREE.CanvasTexture(hudCanvas);
+            const hudGeo = new THREE.PlaneGeometry(0.35, 0.35);
+            // depthTest false ensures it renders over the swarm for legibility
+            const hudMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthTest: false }); 
+            hudMesh = new THREE.Mesh(hudGeo, hudMat);
+            hudMesh.renderOrder = 999;
+            hudMesh.visible = false;
+            scene.add(hudMesh);
+
             setupHand(0); // Left
             setupHand(1); // Right
 
@@ -301,7 +318,7 @@
         }
 
         function updateStatsUI() {
-            // Display stats based on the hand holding the most items to keep UI simple
+            // Display stats based on the hand holding the most items to keep HTML UI simple
             const h = (hands[0]?.userData.heldOrbs.length > hands[1]?.userData.heldOrbs.length) ? hands[0] : (hands[1] || hands[0]);
             if (!h) return;
 
@@ -311,6 +328,77 @@
             const p = h.userData.heldOrbs.filter(o => o.userData.spellType === 'cross').length;
 
             document.getElementById('stats').innerHTML = `Wave: ${currentWave} | Cap: ${total}/${MAX_HELD_ORBS} | Ammo: <span class="ammo-blue">B:${b}</span> <span class="ammo-orange">O:${o}</span> <span class="ammo-purple">P:${p}</span> | Kills: ${enemiesKilled}`;
+        }
+
+        function updateHUDCanvas(timeSeconds, activeHand) {
+            hudCtx.clearRect(0, 0, 512, 512);
+            
+            // Background & Border
+            hudCtx.fillStyle = 'rgba(10, 20, 30, 0.85)';
+            hudCtx.fillRect(0, 0, 512, 512);
+            hudCtx.strokeStyle = '#00ffff';
+            hudCtx.lineWidth = 4;
+            hudCtx.strokeRect(2, 2, 508, 508);
+
+            // Header
+            hudCtx.font = 'bold 32px monospace';
+            hudCtx.fillStyle = '#ffffff';
+            hudCtx.textAlign = 'center';
+            hudCtx.fillText('ECHO WEAVER TACTICAL OS', 256, 45);
+            
+            // Line break
+            hudCtx.beginPath();
+            hudCtx.moveTo(20, 60);
+            hudCtx.lineTo(492, 60);
+            hudCtx.stroke();
+
+            hudCtx.font = 'bold 24px monospace';
+            hudCtx.textAlign = 'left';
+            
+            // Telemetry: Time & Wave
+            const mins = Math.floor(timeSeconds / 60);
+            const secs = Math.floor(timeSeconds % 60).toString().padStart(2, '0');
+            hudCtx.fillText(`TIME ONLINE : ${mins}:${secs}`, 30, 100);
+            hudCtx.fillText(`CURRENT WAVE: ${currentWave}`, 30, 140);
+            hudCtx.fillText(`HOSTILES KIA: ${enemiesKilled}`, 30, 180);
+
+            // Line break
+            hudCtx.beginPath();
+            hudCtx.moveTo(20, 200);
+            hudCtx.lineTo(492, 200);
+            hudCtx.stroke();
+
+            // Ammunition Status
+            const b = activeHand?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
+            const o = activeHand?.userData.heldOrbs.filter(o => o.userData.spellType === 'triangle').length || 0;
+            const p = activeHand?.userData.heldOrbs.filter(o => o.userData.spellType === 'cross').length || 0;
+            const total = activeHand?.userData.heldOrbs.length || 0;
+
+            hudCtx.fillStyle = '#ffffff';
+            hudCtx.fillText(`GAUNTLET AMMO [${total}/${MAX_HELD_ORBS}]:`, 30, 240);
+            
+            hudCtx.fillStyle = '#00aaff'; 
+            hudCtx.fillText(`BLUE   (Line) : ${b}`, 50, 280);
+            hudCtx.fillStyle = '#ffaa00'; 
+            hudCtx.fillText(`ORANGE (Tri)  : ${o}`, 50, 310);
+            hudCtx.fillStyle = '#aa00ff'; 
+            hudCtx.fillText(`PURPLE (Cross): ${p}`, 50, 340);
+
+            // Line break
+            hudCtx.beginPath();
+            hudCtx.moveTo(20, 360);
+            hudCtx.lineTo(492, 360);
+            hudCtx.stroke();
+
+            // Sigil Legend
+            hudCtx.fillStyle = '#ffffff';
+            hudCtx.fillText(`SIGIL LEGEND:`, 30, 400);
+            hudCtx.font = '20px monospace';
+            hudCtx.fillText(`Line     -> Beam / Unibeam (5 Blue)`, 50, 430);
+            hudCtx.fillText(`Triangle -> Kinetic Repulse`, 50, 460);
+            hudCtx.fillText(`Cross/X  -> Shotgun Barrage`, 50, 490);
+
+            hudTexture.needsUpdate = true;
         }
 
         function damageHeartStone(amount) {
@@ -386,7 +474,7 @@
                 phase: Math.random() * Math.PI * 2, 
                 heldBy: null, 
                 state: 'idle',
-                spellType: typeInfo.type // Bind the color to the spell mechanic
+                spellType: typeInfo.type 
             };
             scene.add(orb);
             orbs.push(orb);
@@ -475,6 +563,22 @@
         function isPinching(hand) {
             if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['index-finger-tip']) return false;
             return hand.joints['thumb-tip'].position.distanceTo(hand.joints['index-finger-tip'].position) < PINCH_THRESH; 
+        }
+
+        function isShaka(hand) {
+            // Evaluates if thumb and pinky are extended, and index is curled
+            if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['pinky-finger-tip'] || !hand.joints['index-finger-tip'] || !hand.joints['wrist']) return false;
+            
+            const thumbTip = hand.joints['thumb-tip'].position;
+            const pinkyTip = hand.joints['pinky-finger-tip'].position;
+            const indexTip = hand.joints['index-finger-tip'].position;
+            const wrist = hand.joints['wrist'].position;
+
+            const spread = thumbTip.distanceTo(pinkyTip);
+            const indexCurl = indexTip.distanceTo(wrist);
+
+            // Shaka: Wide spread, tight curl on index
+            return spread > 0.12 && indexCurl < 0.09; 
         }
 
         function updateTargeting() {
@@ -663,7 +767,7 @@
                 
                 if (activeHand && activeHand.userData.heldOrbs.length > 0) {
                     
-                    // NEW MECHANIC: Filter orbs to only consume the ones matching the spell type
+                    // Filter orbs to only consume the ones matching the spell type
                     const matchingOrbs = activeHand.userData.heldOrbs.filter(o => o.userData.spellType === finalSpell);
 
                     if (matchingOrbs.length > 0) {
@@ -687,12 +791,19 @@
             }
         }
 
-        function updateHands(timeDelta) {
+        function updateHands(timeDelta, timeSeconds) {
+            let activeShakaHand = null;
+
             hands.forEach(hand => {
                 if (!hand || !hand.joints) return;
 
                 const wristSpace = hand.joints['wrist'];
                 if (!wristSpace || !wristSpace.position) return; 
+
+                // HUD Gesture Check
+                if (isShaka(hand)) {
+                    activeShakaHand = hand;
+                }
 
                 // Update Gauntlet Position
                 if (hand.userData.gauntletMesh) {
@@ -739,7 +850,7 @@
                 }
 
                 // Absorb Energy
-                if (hand.userData.heldOrbs.length < MAX_HELD_ORBS && isOp) {
+                if (hand.userData.heldOrbs.length < MAX_HELD_ORBS && isOp && !activeShakaHand) {
                     for (let i = 0; i < orbs.length; i++) {
                         const orb = orbs[i];
                         if (orb.userData.state === 'held') continue; 
@@ -786,6 +897,21 @@
                     }
                 }
             });
+
+            // HUD Display Logic
+            if (activeShakaHand && activeShakaHand.joints['wrist']) {
+                hudMesh.visible = true;
+                const wristPos = activeShakaHand.joints['wrist'].position;
+                
+                // Position HUD slightly above and forward of the wrist
+                const offset = new THREE.Vector3(0, 0.25, -0.1).applyQuaternion(activeShakaHand.joints['wrist'].quaternion);
+                hudMesh.position.copy(wristPos).add(offset);
+                hudMesh.lookAt(camera.position);
+                
+                updateHUDCanvas(timeSeconds, activeShakaHand);
+            } else {
+                hudMesh.visible = false;
+            }
         }
 
         function updateEntities(timeDelta, timeSeconds) {
@@ -836,7 +962,7 @@
 
             // Spawn Ammo
             orbSpawnTimer -= timeDelta;
-            if (orbSpawnTimer <= 0 && orbs.length < 10) { // Bumped ambient ammo pool to 10
+            if (orbSpawnTimer <= 0 && orbs.length < 10) { 
                 orbSpawnTimer = ORB_SPAWN_RATE;
                 const angle = Math.PI + (Math.random() * Math.PI); 
                 const radius = 0.3 + Math.random() * 0.2; 
@@ -923,7 +1049,7 @@
             heartStone.rotation.x += 0.005;
 
             if (renderer.xr.isPresenting) {
-                updateHands(timeDelta);
+                updateHands(timeDelta, timeSeconds);
                 updateTargeting(); 
             }
 
