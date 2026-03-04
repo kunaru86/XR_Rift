@@ -128,11 +128,11 @@
 
         // Wave Logic
         let currentWave = 1;
-        let enemiesTotalThisWave = 30;
+        let enemiesTotalThisWave = 10; // Scaled down for learning curve
         let enemiesSpawnedThisWave = 0;
         let waveState = 'spawning'; 
         let intermissionTimer = 0;
-        let baseEnemySpawnRate = 2.0;
+        let baseEnemySpawnRate = 3.5; // Starts much slower
         let enemySpawnTimer = 0;
 
         let enemiesKilled = 0;
@@ -351,7 +351,6 @@
             hudCtx = hudCanvas.getContext('2d');
             hudTexture = new THREE.CanvasTexture(hudCanvas);
             const hudGeo = new THREE.PlaneGeometry(0.35, 0.35);
-            // depthTest false ensures it renders over the swarm for legibility
             const hudMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthTest: false }); 
             hudMesh = new THREE.Mesh(hudGeo, hudMat);
             hudMesh.renderOrder = 999;
@@ -484,13 +483,14 @@
             else healthRing.material.color.setHex(0xff0000);
 
             if (heartHealth <= 0) {
-                // GAME OVER - Reset to Wave 1
+                // GAME OVER - Reset to Wave 1 Defaults
                 heartHealth = 100;
                 enemiesKilled = 0;
                 currentWave = 1;
-                enemiesTotalThisWave = 30;
+                enemiesTotalThisWave = 10;
                 enemiesSpawnedThisWave = 0;
                 waveState = 'spawning';
+                enemySpawnTimer = 0;
                 
                 const ann = document.getElementById('wave-announce');
                 ann.innerText = "SYSTEM REBOOT - WAVE 1";
@@ -550,21 +550,23 @@
             orbs.push(orb);
         }
 
-        function createEnemy(position, type) {
+        function createEnemy(position, type, waveLevel) {
             let scale, hp, speed, color, emissive;
 
             if (type === 'brute') {
                 scale = 1.8;
                 hp = 3;
-                speed = 0.2;
                 color = 0x880000;
                 emissive = 0x550000;
+                // Starts slow, gradually speeds up as waves progress
+                speed = 0.15 + (waveLevel * 0.02); 
             } else { // 'drone'
                 scale = 1.0;
                 hp = 1;
-                speed = 0.5;
                 color = 0xff0000;
                 emissive = 0xaa0000;
+                // Significantly slower initially, climbs back to original baseline (0.5) by wave 4
+                speed = 0.30 + (waveLevel * 0.05); 
             }
 
             const geo = new THREE.IcosahedronGeometry(0.12 * scale, 0);
@@ -993,25 +995,27 @@
             if (waveState === 'spawning') {
                 enemySpawnTimer -= timeDelta;
                 if (enemySpawnTimer <= 0 && enemiesSpawnedThisWave < enemiesTotalThisWave) {
-                    enemySpawnTimer = Math.max(0.5, baseEnemySpawnRate - (currentWave * 0.2)); 
+                    // Spawn rates accelerate smoothly across waves
+                    enemySpawnTimer = Math.max(0.6, baseEnemySpawnRate - (currentWave * 0.4)); 
                     
                     const angle = Math.PI + (Math.random() * Math.PI); 
                     const radius = 6 + (Math.random() * 2); 
                     const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
                     
                     let type = 'drone';
-                    if (currentWave >= 2 && Math.random() < 0.15 + (currentWave * 0.05)) {
+                    // Brutes do not appear until Wave 3
+                    if (currentWave >= 3 && Math.random() < 0.05 + (currentWave * 0.05)) {
                         type = 'brute';
                     }
 
-                    createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius), type);
+                    createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius), type, currentWave);
                     enemiesSpawnedThisWave++;
                 }
 
                 // Check Wave Completion
                 if (enemiesSpawnedThisWave >= enemiesTotalThisWave && enemies.length === 0) {
                     waveState = 'intermission';
-                    intermissionTimer = 4.0;
+                    intermissionTimer = 5.0; // Giving you an extra second to breathe
                     const ann = document.getElementById('wave-announce');
                     ann.innerText = "WAVE CLEAR";
                     ann.style.opacity = 1;
@@ -1020,7 +1024,8 @@
                 intermissionTimer -= timeDelta;
                 if (intermissionTimer <= 0) {
                     currentWave++;
-                    enemiesTotalThisWave = 20 + (currentWave * 10); // Escalating threat matrix
+                    // Difficulty Scales: W1(10), W2(20), W3(30)...
+                    enemiesTotalThisWave = 10 * currentWave; 
                     enemiesSpawnedThisWave = 0;
                     waveState = 'spawning';
                     
