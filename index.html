@@ -6,13 +6,40 @@
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
     
     <script>
-      // 1. PROJECTILE SYSTEM (Pure, clean ballistics)
+      // 0. GAME MANAGER (Clean entity tracking, no messy global variables)
+      AFRAME.registerSystem('game-manager', {
+        init: function() {
+          this.targets = [];
+        },
+        registerTarget: function(t) { this.targets.push(t); },
+        unregisterTarget: function(t) {
+          const idx = this.targets.indexOf(t);
+          if (idx > -1) this.targets.splice(idx, 1);
+        }
+      });
+
+      // Simple component to attach to any object you want to blow up
+      AFRAME.registerComponent('shootable-target', {
+        init: function() {
+          this.system = this.el.sceneEl.systems['game-manager'];
+          this.system.registerTarget(this.el);
+        },
+        remove: function() {
+          if (this.system) this.system.unregisterTarget(this.el);
+        }
+      });
+
+      // 1. PROJECTILE SYSTEM (Now with collision and explosions)
       AFRAME.registerComponent('projectile-behavior', {
         schema: {
           direction: {type: 'vec3'},
-          speed: {type: 'number', default: 15}
+          speed: {type: 'number', default: 10} // Slowed down for visual tracking
         },
         init: function() {
+          this.system = this.el.sceneEl.systems['game-manager'];
+          this.myPos = new THREE.Vector3();
+          this.tPos = new THREE.Vector3();
+
           // Self-destruct timer so we don't leak memory if it flies into the void
           this.lifeTimer = setTimeout(() => {
             if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
@@ -25,6 +52,37 @@
           this.el.object3D.position.x += this.data.direction.x * this.data.speed * deltaSec;
           this.el.object3D.position.y += this.data.direction.y * this.data.speed * deltaSec;
           this.el.object3D.position.z += this.data.direction.z * this.data.speed * deltaSec;
+
+          this.el.object3D.getWorldPosition(this.myPos);
+
+          // Collision Detection Loop
+          const targets = this.system.targets;
+          for (let i = targets.length - 1; i >= 0; i--) {
+            const t = targets[i];
+            if (!t.parentNode) continue;
+            
+            t.object3D.getWorldPosition(this.tPos);
+            
+            // Hitbox radius: 0.6 meters
+            if (this.myPos.distanceTo(this.tPos) < 0.6) {
+              // Spawn explosion effect
+              const flash = document.createElement('a-entity');
+              flash.setAttribute('geometry', 'primitive: sphere; radius: 0.3');
+              flash.setAttribute('material', 'color: #ffaa00; shader: flat; transparent: true');
+              flash.setAttribute('position', this.tPos);
+              flash.setAttribute('animation__scale', 'property: scale; to: 2 2 2; dur: 200; easing: easeOutQuad');
+              flash.setAttribute('animation__fade', 'property: material.opacity; to: 0; dur: 200; easing: easeOutQuad');
+              this.el.sceneEl.appendChild(flash);
+              
+              // Clean up flash
+              setTimeout(() => { if (flash.parentNode) flash.parentNode.removeChild(flash); }, 250);
+
+              // Destroy target and projectile
+              t.parentNode.removeChild(t);
+              this.el.parentNode.removeChild(this.el);
+              return; // Stop processing this projectile
+            }
+          }
         },
         remove: function() {
           clearTimeout(this.lifeTimer);
@@ -34,27 +92,24 @@
       // 2. THE RELATIVISTIC FINGER GUN
       AFRAME.registerComponent('finger-gun', {
         init: function () {
-          this.state = 'DISARMED'; // DISARMED, ARMED, COOLDOWN
+          this.state = 'DISARMED'; 
           
-          // The Laser Pointer
           this.laser = document.createElement('a-entity');
           this.laser.setAttribute('geometry', 'primitive: cylinder; radius: 0.002; height: 10');
           this.laser.setAttribute('material', 'color: #ff0000; shader: flat; transparent: true; opacity: 0.6');
           this.laser.setAttribute('rotation', '90 0 0'); 
-          this.laser.setAttribute('position', '0 0 -5'); // Pivot at the base
+          this.laser.setAttribute('position', '0 0 -5'); 
           
           this.laserPivot = document.createElement('a-entity');
           this.laserPivot.appendChild(this.laser);
           this.el.appendChild(this.laserPivot);
 
-          // The Muzzle Flash
           this.muzzleFlash = document.createElement('a-entity');
-          this.muzzleFlash.setAttribute('geometry', 'primitive: sphere; radius: 0.04');
+          this.muzzleFlash.setAttribute('geometry', 'primitive: sphere; radius: 0.06');
           this.muzzleFlash.setAttribute('material', 'color: #ffffff; shader: flat');
           this.muzzleFlash.setAttribute('visible', 'false');
           this.el.appendChild(this.muzzleFlash);
 
-          // Vector cache to prevent garbage collection stutter
           this.vWrist = new THREE.Vector3();
           this.vThumbTip = new THREE.Vector3();
           this.vIndexBase = new THREE.Vector3();
@@ -62,15 +117,31 @@
           this.vMidTip = new THREE.Vector3();
           this.vRingTip = new THREE.Vector3();
           this.vPinkyTip = new THREE.Vector3();
+
+          // Mesh Hijacker for Rainbow Effect
+          this.handMesh = null;
+          this.defaultColor = null;
+          this.el.addEventListener('model-loaded', () => {
+            const mesh = this.el.getObject3D('mesh');
+            if (mesh) {
+              mesh.traverse((node) => {
+                if (node.isMesh && node.material) {
+                  this.handMesh = node;
+                  // Clone it so the left and right hands don't share the exact same material instance
+                  this.handMesh.material = node.material.clone(); 
+                  this.defaultColor = this.handMesh.material.color.clone();
+                }
+              });
+            }
+          });
         },
         
-        tick: function () {
+        tick: function (time, timeDelta) {
           const tracking = this.el.components['hand-tracking-controls'];
           if (!tracking || !tracking.bones || tracking.bones.length === 0) return;
 
           const bones = tracking.bones;
           
-          // Map WebXR joints
           bones[0].getWorldPosition(this.vWrist);
           bones[4].getWorldPosition(this.vThumbTip);
           bones[5].getWorldPosition(this.vIndexBase);
@@ -79,26 +150,20 @@
           bones[19].getWorldPosition(this.vRingTip);
           bones[24].getWorldPosition(this.vPinkyTip);
 
-          // AIMING: Index Knuckle to Index Tip. Absolute precision.
           const aimDirection = new THREE.Vector3().subVectors(this.vIndexTip, this.vIndexBase).normalize();
 
-          // Snap laser and flash to the physical index tip
           this.laserPivot.object3D.position.copy(this.vIndexTip);
           const targetPoint = new THREE.Vector3().copy(this.vIndexTip).add(aimDirection);
           this.laserPivot.object3D.lookAt(targetPoint);
           this.muzzleFlash.object3D.position.copy(this.vIndexTip);
 
-          // BIOMETRIC CALIBRATION: Distance from wrist to index knuckle. 
-          // This scales the math to fit your specific hand size.
           const baseUnit = this.vWrist.distanceTo(this.vIndexBase);
 
-          // Measure distance of all fingertips to the wrist
           const lenIndex = this.vIndexTip.distanceTo(this.vWrist);
           const lenMid = this.vMidTip.distanceTo(this.vWrist);
           const lenRing = this.vRingTip.distanceTo(this.vWrist);
           const lenPinky = this.vPinkyTip.distanceTo(this.vWrist);
 
-          // POSE DETECTION: Index/Mid extended (> 1.5 units), Ring/Pinky curled (< 1.3 units)
           const isGunPose = (
             lenIndex > baseUnit * 1.5 && 
             lenMid > baseUnit * 1.5 && 
@@ -106,18 +171,25 @@
             lenPinky < baseUnit * 1.3
           );
 
-          // THUMB DETECTION: How far is the thumb tip from the index base knuckle?
           const thumbDistance = this.vThumbTip.distanceTo(this.vIndexBase);
           
-          // Thumb is high (cocked) if distance > 0.8 units. 
-          // Thumb is dropped (fired) if distance < 0.65 units.
           const isThumbCocked = thumbDistance > baseUnit * 0.8;
           const isThumbDropped = thumbDistance < baseUnit * 0.65;
 
-          // STATE MACHINE LOGIC
+          // RAINBOW ACTIVATION LOGIC
+          if (isGunPose && this.handMesh) {
+            const hue = (time % 2000) / 2000;
+            this.handMesh.material.color.setHSL(hue, 1.0, 0.5);
+            this.handMesh.material.emissive.setHSL(hue, 1.0, 0.2); // Makes it glow slightly
+          } else if (!isGunPose && this.handMesh && this.defaultColor) {
+            this.handMesh.material.color.copy(this.defaultColor);
+            this.handMesh.material.emissive.setHex(0x000000);
+          }
+
+          // FIRING STATE MACHINE LOGIC
           if (!isGunPose) {
             this.state = 'DISARMED';
-            this.laser.setAttribute('material', 'color: #ff0000'); // Red laser
+            this.laser.setAttribute('material', 'color: #ff0000'); 
             this.laser.setAttribute('visible', 'true');
             return;
           }
@@ -125,34 +197,32 @@
           if (this.state === 'DISARMED' && isThumbCocked) {
             this.state = 'ARMED';
           } else if (this.state === 'COOLDOWN' && isThumbCocked) {
-            this.state = 'ARMED'; // Reset the sear
+            this.state = 'ARMED'; 
           }
 
           if (this.state === 'ARMED') {
-            this.laser.setAttribute('material', 'color: #00ff00'); // Green laser = ready to fire
+            this.laser.setAttribute('material', 'color: #00ff00'); 
             
             if (isThumbDropped) {
               this.fire(aimDirection);
               this.state = 'COOLDOWN';
             }
           } else if (this.state === 'COOLDOWN') {
-            this.laser.setAttribute('material', 'color: #ffff00'); // Yellow laser = resetting
+            this.laser.setAttribute('material', 'color: #ffff00'); 
           }
         },
 
         fire: function(aimVector) {
-          // Visual feedback
           this.muzzleFlash.setAttribute('visible', 'true');
           setTimeout(() => { this.muzzleFlash.setAttribute('visible', 'false'); }, 50);
 
-          // Spawn Projectile
           const projectile = document.createElement('a-entity');
-          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.05');
-          projectile.setAttribute('material', 'color: #00ffff; shader: flat');
-          projectile.setAttribute('position', this.vIndexTip); // Shoot from the fingertip
+          // Made it significantly larger and brighter so it cannot be missed
+          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.1');
+          projectile.setAttribute('material', 'color: #00ffff; emissive: #00ffff; emissiveIntensity: 1; shader: flat');
+          projectile.setAttribute('position', this.vIndexTip); 
           
-          // Stretch it into a blaster bolt
-          projectile.object3D.scale.set(1, 1, 4);
+          projectile.object3D.scale.set(1, 1, 3);
           const alignTarget = new THREE.Vector3().copy(this.vIndexTip).add(aimVector);
           projectile.object3D.lookAt(alignTarget);
 
@@ -165,15 +235,22 @@
     </script>
   </head>
   <body>
-    <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #111111">
+    <!-- Added game-manager to the scene -->
+    <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #111111" game-manager>
       
       <!-- Spatial reference floor -->
       <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222222" material="wireframe: true"></a-plane>
 
+      <!-- TARGET SPAWNER -->
+      <a-entity id="target-range">
+        <a-box position="-2 1.5 -5" color="#ff0055" shootable-target animation="property: rotation; to: 360 360 0; loop: true; dur: 3000; easing: linear"></a-box>
+        <a-box position="0 1.5 -5" color="#ff0055" shootable-target animation="property: rotation; to: 360 360 0; loop: true; dur: 4000; easing: linear"></a-box>
+        <a-box position="2 1.5 -5" color="#ff0055" shootable-target animation="property: rotation; to: 360 360 0; loop: true; dur: 5000; easing: linear"></a-box>
+      </a-entity>
+
       <a-entity id="rig" position="0 0 0">
         <a-camera position="0 1.6 0"></a-camera>
         
-        <!-- Both hands equipped with the relativistic math -->
         <a-entity id="leftHand" hand-tracking-controls="hand: left;" finger-gun></a-entity>
         <a-entity id="rightHand" hand-tracking-controls="hand: right;" finger-gun></a-entity>
       </a-entity>
