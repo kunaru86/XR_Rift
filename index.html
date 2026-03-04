@@ -27,7 +27,7 @@
     </script>
 </head>
 <body>
-    <div id="info">Echo Weaver: Phase 2<br/>Catch an Orb, point your index finger, and draw a Line, Circle, or Triangle.</div>
+    <div id="info">Echo Weaver: Phase 2<br/>Catch an Orb, pinch your index and thumb together to draw, release to cast.</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -42,8 +42,7 @@
         // --- Settings ---
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
-        const DRAW_VELOCITY_THRESH = 0.005; // Minimum finger speed to start drawing
-        const DRAW_TIMEOUT = 1.2; // Increased to give the human brain time to process drawing
+        const PINCH_THRESH = 0.03; // Distance between thumb and index to trigger drawing
 
         const smoothedJoints = new Map();
 
@@ -54,7 +53,6 @@
         let currentTrailCount = 0;
         let isDrawing = false;
         let drawPoints3D = [];
-        let drawTimer = 0;
         let activeCastingHand = null;
 
         // --- $1 Recognizer Implementation (Compact) ---
@@ -263,7 +261,6 @@
             hand.userData.jointMeshes = {};
             hand.userData.isHolding = false;
             hand.userData.handedness = index === 0 ? 'left' : 'right';
-            hand.userData.prevIndexPos = new THREE.Vector3();
 
             hand.addEventListener('connected', (event) => { hand.userData.xrInputSource = event.data; });
             hands[index] = hand;
@@ -294,6 +291,12 @@
             if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
             const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
             return dist < 0.07; // Tight fist threshold (Hysteresis prevents accidental drops)
+        }
+
+        function isPinching(hand) {
+            if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['index-finger-tip']) return false;
+            const dist = hand.joints['thumb-tip'].position.distanceTo(hand.joints['index-finger-tip'].position);
+            return dist < PINCH_THRESH; // Pinch threshold
         }
 
         function fireSpell(type, origin) {
@@ -390,8 +393,8 @@
 
                 const isOp = isHandOpen(hand);
                 const isClosed = isHandClosed(hand);
+                const pinching = isPinching(hand);
                 const wristPos = hand.joints['wrist'].position;
-                const indexPos = hand.joints['index-finger-tip'].position;
 
                 // Grab / Drop
                 if (hand.userData.isHolding && isClosed && !isDrawing) {
@@ -416,11 +419,9 @@
                     }
                 }
 
-                // Spellcasting / Drawing Logic
+                // Spellcasting / Drawing Logic via Pinch
                 if (hand.userData.isHolding) {
-                    const indexVel = indexPos.distanceTo(hand.userData.prevIndexPos);
-                    
-                    if (indexVel > DRAW_VELOCITY_THRESH) {
+                    if (pinching) {
                         // Start / Continue drawing
                         if (!isDrawing) {
                             isDrawing = true;
@@ -428,30 +429,30 @@
                             drawPoints3D = [];
                             activeCastingHand = hand.userData.handedness;
                         }
-                        drawTimer = 0; // Reset stillness timer
                         
                         if (currentTrailCount < MAX_TRAIL_POINTS && activeCastingHand === hand.userData.handedness) {
-                            drawPoints3D.push(indexPos.clone());
-                            trailPositions[currentTrailCount * 3] = indexPos.x;
-                            trailPositions[currentTrailCount * 3 + 1] = indexPos.y;
-                            trailPositions[currentTrailCount * 3 + 2] = indexPos.z;
+                            // Calculate midpoint between thumb and index for cleaner ink origin
+                            const pinchPoint = new THREE.Vector3().addVectors(
+                                hand.joints['thumb-tip'].position, 
+                                hand.joints['index-finger-tip'].position
+                            ).multiplyScalar(0.5);
+
+                            drawPoints3D.push(pinchPoint.clone());
+                            trailPositions[currentTrailCount * 3] = pinchPoint.x;
+                            trailPositions[currentTrailCount * 3 + 1] = pinchPoint.y;
+                            trailPositions[currentTrailCount * 3 + 2] = pinchPoint.z;
                             currentTrailCount++;
                             trailGeo.setDrawRange(0, currentTrailCount);
                             trailGeo.attributes.position.needsUpdate = true;
                         }
                     } else if (isDrawing && activeCastingHand === hand.userData.handedness) {
-                        // Finger is still. Count down to finalize cast.
-                        drawTimer += timeDelta;
-                        if (drawTimer > DRAW_TIMEOUT) {
-                            isDrawing = false;
-                            processGesture();
-                            trailGeo.setDrawRange(0, 0); // Clear trail visually
-                            currentTrailCount = 0;
-                        }
+                        // Released the pinch. Instantly cast.
+                        isDrawing = false;
+                        processGesture();
+                        trailGeo.setDrawRange(0, 0); // Clear trail visually
+                        currentTrailCount = 0;
                     }
                 }
-
-                hand.userData.prevIndexPos.copy(indexPos);
             });
         }
 
