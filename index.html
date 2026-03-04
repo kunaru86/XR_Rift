@@ -10,17 +10,16 @@
         init: function() {
           this.indicator = document.createElement('a-entity');
           this.indicator.setAttribute('geometry', 'primitive: sphere; radius: 0.06');
-          this.indicator.setAttribute('material', 'color: #ff0000; wireframe: true; opacity: 0.5');
+          this.indicator.setAttribute('material', 'color: #ff0000; wireframe: true; opacity: 0.5; shader: flat');
           this.el.appendChild(this.indicator);
 
           this.el.addEventListener('pinchstarted', () => {
-            // Direct object3D manipulation is faster, but for discrete events setAttribute is acceptable.
-            this.indicator.setAttribute('material', 'color: #00ff00; wireframe: false; opacity: 1');
+            this.indicator.setAttribute('material', 'color: #00ff00; wireframe: false; opacity: 1; shader: flat');
             console.log(this.el.id + " PINCH INITIATED");
           });
           
           this.el.addEventListener('pinchended', () => {
-            this.indicator.setAttribute('material', 'color: #ff0000; wireframe: true; opacity: 0.5');
+            this.indicator.setAttribute('material', 'color: #ff0000; wireframe: true; opacity: 0.5; shader: flat');
             console.log(this.el.id + " PINCH RELEASED");
           });
         }
@@ -72,7 +71,7 @@
         }
       });
 
-      // 4. THE SPATIAL TEAR MANAGER (Optimized for Three.js Direct Manipulation)
+      // 4. THE SPATIAL TEAR MANAGER
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
@@ -80,9 +79,6 @@
           this.rift = document.querySelector('#dimensional-rift');
           this.camera = document.querySelector('a-camera');
           this.lastSpawnTime = 0;
-          
-          // Start the rift completely hidden at the engine level
-          this.rift.object3D.visible = false;
           
           const leftHand = document.querySelector('#leftHand');
           const rightHand = document.querySelector('#rightHand');
@@ -106,19 +102,12 @@
             
             const distance = leftPos.distanceTo(rightPos);
             
-            // Aggressive scaling so you don't have to pull your arms out of their sockets
-            const tearScale = distance * 4; 
+            // Added a minimum scale of 0.1 so it's instantly visible the millisecond you pinch
+            const tearScale = Math.max(0.1, distance * 5); 
             
-            // Find the physical midpoint between hands
+            // We place it EXACTLY between your hands. No fancy vector projection to screw up.
             const midPoint = new THREE.Vector3().addVectors(leftPos, rightPos).multiplyScalar(0.5);
             
-            // Vector Projection: Push the rift forward along your gaze vector so it spawns *in front* of your fingers
-            const camDir = new THREE.Vector3();
-            this.camera.object3D.getWorldDirection(camDir);
-            // WebGL forward is -Z, but getWorldDirection accounts for that. We add the vector.
-            midPoint.addScaledVector(camDir, 0.15); // Pushed 15cm forward
-            
-            // Direct Three.js bypass (No DOM manipulation = fast)
             this.rift.object3D.position.copy(midPoint);
             this.rift.object3D.scale.set(tearScale, tearScale, 1); 
             this.rift.object3D.visible = true;
@@ -149,7 +138,7 @@
         }
       });
 
-      // 5. THE KINETIC RECOIL CANNON (Optimized)
+      // 5. THE KINETIC RECOIL CANNON 
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.previousPosition = new THREE.Vector3();
@@ -207,10 +196,11 @@
       
       <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222222" material="wireframe: true"></a-plane>
 
-      <!-- DEBUG RIFT: Opacity is permanently 1, but Three.js visibility handles the toggle -->
+      <!-- DEBUG RIFT: Flat shader ensures it ignores lighting and is always visible. Starts invisible. -->
       <a-entity id="dimensional-rift" 
                 geometry="primitive: plane; width: 1; height: 1" 
-                material="color: #ff00ff; side: double; transparent: true; opacity: 1">
+                material="color: #ff00ff; side: double; shader: flat" 
+                visible="false">
       </a-entity>
 
       <!-- Player Rig -->
