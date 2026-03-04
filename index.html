@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo Weaver - Phase 5</title>
+    <title>Echo Weaver - Phase 6</title>
     <style>
         body { 
             margin: 0; 
@@ -90,7 +90,7 @@
 </head>
 <body>
     <div id="info">
-        <div class="header-text">ECHO WEAVER OS // V.5.0</div>
+        <div class="header-text">ECHO WEAVER OS // V.6.0</div>
         <div class="sub-text">Match Ammo to Spells. 5 Blue + Line = UNIBEAM.<br/>Drop hand to a fist to vent Ammo.<br/><strong>Extend Thumb & Pinky (Shaka) for Tactical HUD.</strong></div>
         <div id="stats" class="stat-container">
             <div class="stat-box b-white" id="ui-wave">WAVE: 1</div>
@@ -128,11 +128,11 @@
 
         // Wave Logic
         let currentWave = 1;
-        let enemiesTotalThisWave = 10; // Scaled down for learning curve
+        let enemiesTotalThisWave = 10; 
         let enemiesSpawnedThisWave = 0;
         let waveState = 'spawning'; 
         let intermissionTimer = 0;
-        let baseEnemySpawnRate = 3.5; // Starts much slower
+        let baseEnemySpawnRate = 3.5; 
         let enemySpawnTimer = 0;
 
         let enemiesKilled = 0;
@@ -287,8 +287,10 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x0a0a12);
-            scene.fog = new THREE.Fog(0x0a0a12, 2, 10);
+            // Darker background for the neon to pop
+            scene.background = new THREE.Color(0x020408);
+            // Push fog further back to reveal the cityscape
+            scene.fog = new THREE.Fog(0x020408, 5, 35); 
 
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
             camera.position.set(0, 1.6, 3); 
@@ -300,9 +302,8 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // --- Environment Setup ---
-            const grid = new THREE.GridHelper(20, 40, 0x222244, 0x111122);
-            scene.add(grid);
+            // --- Environment Setup (The Grid) ---
+            buildSimulationEnvironment();
 
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
             scene.add(ambientLight);
@@ -324,6 +325,8 @@
             const ringMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
             healthRing = new THREE.Mesh(ringGeo, ringMat);
             healthRing.rotation.x = Math.PI / 2;
+            // Move ring slightly up so it doesn't clip into the new pedestal
+            healthRing.position.y = -0.25; 
             heartStone.add(healthRing); 
 
             // --- Trail Setup ---
@@ -334,7 +337,7 @@
             trailLine = new THREE.Line(trailGeo, trailMat);
             scene.add(trailLine);
 
-            // --- Lock-on Reticles Pool (Up to 5 now) ---
+            // --- Lock-on Reticles Pool ---
             for (let i = 0; i < MAX_HELD_ORBS; i++) {
                 const rGeo = new THREE.RingGeometry(0.18, 0.22, 16);
                 const rMat = new THREE.MeshBasicMaterial({color: 0x00aaff, side: THREE.DoubleSide, transparent: true, opacity: 0.7});
@@ -361,6 +364,63 @@
             setupHand(1); // Right
 
             window.addEventListener('resize', onWindowResize);
+        }
+
+        function buildSimulationEnvironment() {
+            // 1. Solid Floor
+            const floorGeo = new THREE.PlaneGeometry(100, 100);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x050811, roughness: 0.9, metalness: 0.2 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // 2. Main TRON Grid
+            const grid = new THREE.GridHelper(100, 100, 0x00aaff, 0x002244);
+            grid.position.y = 0.01; // Slightly above floor to prevent Z-fighting
+            scene.add(grid);
+
+            // 3. Central Pedestal for Heart Stone
+            const pedGeo = new THREE.CylinderGeometry(0.8, 1.0, 0.5, 6);
+            const pedMat = new THREE.MeshStandardMaterial({ color: 0x0a101a, metalness: 0.8, roughness: 0.3 });
+            const pedestal = new THREE.Mesh(pedGeo, pedMat);
+            pedestal.position.set(0, 0.25, -0.5); 
+            scene.add(pedestal);
+
+            // Pedestal Wireframe Overlay
+            const pedEdges = new THREE.EdgesGeometry(pedGeo);
+            const pedLine = new THREE.LineSegments(pedEdges, new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 }));
+            pedestal.add(pedLine);
+
+            // 4. Procedural Cityscape / Data Towers
+            const cityGroup = new THREE.Group();
+            const numTowers = 45;
+            
+            for(let i=0; i<numTowers; i++) {
+                // Randomize dimensions
+                const h = 2 + Math.random() * 15;
+                const w = 1 + Math.random() * 4;
+                const d = 1 + Math.random() * 4;
+                
+                const bGeo = new THREE.BoxGeometry(w, h, d);
+                const bMat = new THREE.MeshStandardMaterial({ color: 0x020408, metalness: 0.9, roughness: 0.1 });
+                const bMesh = new THREE.Mesh(bGeo, bMat);
+
+                // Position in a ring outside the combat zone (12m to 30m away)
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 12 + Math.random() * 18; 
+                bMesh.position.set(Math.cos(angle) * radius, h/2, Math.sin(angle) * radius);
+
+                // Neon Edges
+                const edges = new THREE.EdgesGeometry(bGeo);
+                // Randomize edge colors between Cyan and Purple to match spells
+                const edgeColor = Math.random() > 0.5 ? 0x00aaff : 0xaa00ff;
+                const lineMat = new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.4 });
+                const line = new THREE.LineSegments(edges, lineMat);
+                bMesh.add(line);
+
+                cityGroup.add(bMesh);
+            }
+            scene.add(cityGroup);
         }
 
         function handleEnemyKill() {
@@ -401,13 +461,9 @@
             // Corner Brackets
             const cL = 35; // Corner Length
             const cT = 8;  // Corner Thickness
-            // TL
             hudCtx.fillRect(10, 10, cL, cT); hudCtx.fillRect(10, 10, cT, cL);
-            // TR
             hudCtx.fillRect(502 - cL, 10, cL, cT); hudCtx.fillRect(494, 10, cT, cL);
-            // BL
             hudCtx.fillRect(10, 494, cL, cT); hudCtx.fillRect(10, 502 - cL, cT, cL);
-            // BR
             hudCtx.fillRect(502 - cL, 494, cL, cT); hudCtx.fillRect(494, 502 - cL, cT, cL);
 
             // Header
@@ -448,7 +504,6 @@
             hudCtx.fillStyle = '#aaaaaa';
             hudCtx.fillText(`MAGAZINE STATUS [${total}/${MAX_HELD_ORBS}]`, 40, 255);
             
-            // Custom drawn progress bars
             hudCtx.font = '22px Courier New';
             hudCtx.fillStyle = '#00aaff'; hudCtx.fillText(`[BLUE]   LINE : ${b}`, 50, 295);
             hudCtx.fillStyle = '#ffaa00'; hudCtx.fillText(`[ORANGE] TRI  : ${o}`, 50, 325);
@@ -500,7 +555,7 @@
                 healthRing.scale.set(1, 1, 1);
                 healthRing.material.color.setHex(0x00ff00);
                 
-                orbs.forEach(orb => scene.remove(orb));
+                orbs.forEach(orb => scene.remove(orb)); // Note orb is now a Group
                 orbs = [];
                 enemies.forEach(enemy => scene.remove(enemy));
                 enemies = [];
@@ -530,24 +585,65 @@
         }
 
         function createOrb(position) {
-            // Randomize Elemental Type
             const typeInfo = SPELL_TYPES[Math.floor(Math.random() * SPELL_TYPES.length)];
             
-            const geo = new THREE.SphereGeometry(0.06, 16, 16);
-            const mat = new THREE.MeshStandardMaterial({
-                color: typeInfo.color, emissive: typeInfo.color, emissiveIntensity: 0.8, roughness: 0.2, metalness: 0.8
+            // Container for shell and inner mesh
+            const orbGroup = new THREE.Group();
+            orbGroup.position.copy(position);
+
+            // Transparent Shell
+            const shellGeo = new THREE.SphereGeometry(0.06, 16, 16);
+            const shellMat = new THREE.MeshStandardMaterial({
+                color: typeInfo.color, 
+                transparent: true, 
+                opacity: 0.3, 
+                roughness: 0.1, 
+                metalness: 0.8 
             });
-            const orb = new THREE.Mesh(geo, mat);
-            orb.position.copy(position);
-            orb.userData = { 
+            const shell = new THREE.Mesh(shellGeo, shellMat);
+            orbGroup.add(shell);
+
+            // Inner Symbolic Mesh
+            const innerMat = new THREE.MeshStandardMaterial({
+                color: typeInfo.color,
+                emissive: typeInfo.color,
+                emissiveIntensity: 2.0,
+                roughness: 0.5
+            });
+
+            let innerMesh;
+            if (typeInfo.type === 'line') {
+                // Vertical Line
+                const geo = new THREE.CylinderGeometry(0.01, 0.01, 0.08, 8);
+                innerMesh = new THREE.Mesh(geo, innerMat);
+            } else if (typeInfo.type === 'triangle') {
+                // 3D Triangle (Flat Cylinder with 3 segments)
+                const geo = new THREE.CylinderGeometry(0.04, 0.04, 0.015, 3);
+                innerMesh = new THREE.Mesh(geo, innerMat);
+                innerMesh.rotation.x = Math.PI / 2; // Face it outwards initially
+            } else if (typeInfo.type === 'cross') {
+                // 3D Cross
+                innerMesh = new THREE.Group();
+                const geo = new THREE.CylinderGeometry(0.01, 0.01, 0.08, 8);
+                const bar1 = new THREE.Mesh(geo, innerMat);
+                const bar2 = new THREE.Mesh(geo, innerMat);
+                bar2.rotation.z = Math.PI / 2;
+                innerMesh.add(bar1);
+                innerMesh.add(bar2);
+            }
+
+            orbGroup.add(innerMesh);
+
+            orbGroup.userData = { 
                 baseY: position.y, 
                 phase: Math.random() * Math.PI * 2, 
                 heldBy: null, 
                 state: 'idle',
-                spellType: typeInfo.type 
+                spellType: typeInfo.type,
+                innerSymbol: innerMesh // Reference to animate it later
             };
-            scene.add(orb);
-            orbs.push(orb);
+            scene.add(orbGroup);
+            orbs.push(orbGroup);
         }
 
         function createEnemy(position, type, waveLevel) {
@@ -558,14 +654,12 @@
                 hp = 3;
                 color = 0x880000;
                 emissive = 0x550000;
-                // Starts slow, gradually speeds up as waves progress
                 speed = 0.15 + (waveLevel * 0.02); 
-            } else { // 'drone'
+            } else { 
                 scale = 1.0;
                 hp = 1;
                 color = 0xff0000;
                 emissive = 0xaa0000;
-                // Significantly slower initially, climbs back to original baseline (0.5) by wave 4
                 speed = 0.30 + (waveLevel * 0.05); 
             }
 
@@ -638,7 +732,6 @@
         }
 
         function isShaka(hand) {
-            // Evaluates if thumb and pinky are extended, and index is curled
             if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['pinky-finger-tip'] || !hand.joints['index-finger-tip'] || !hand.joints['wrist']) return false;
             
             const thumbTip = hand.joints['thumb-tip'].position;
@@ -655,7 +748,6 @@
         function updateTargeting() {
             lockedEnemies = [];
             
-            // Lockons only apply to the Blue (Line) Orbs
             const blueL = hands[0]?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
             const blueR = hands[1]?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
             const currentCharge = Math.max(blueL, blueR);
@@ -675,7 +767,6 @@
                     lockedEnemies.push(candidates[i].enemy);
                 }
             } else if (currentCharge === MAX_HELD_ORBS) {
-                // UNIBEAM TARGETING MODE - Manual aim required
                 lockedEnemies = [];
             }
 
@@ -779,15 +870,12 @@
                     }
                 });
             } else if (type === 'cross' || type === 'x') {
-                // CROSS BARRAGE - Upgraded to Seek & Destroy Swarm
+                // CROSS BARRAGE - Tracking Swarm
                 const numBeams = 4 * powerLevel;
-                
-                // Sort active hostiles by distance to the origin point of the cast
                 const sortedEnemies = [...enemies].sort((a, b) => a.position.distanceTo(origin) - b.position.distanceTo(origin));
 
                 if (sortedEnemies.length > 0) {
                     for (let i = 0; i < numBeams; i++) {
-                        // Loop through closest targets if we have more beams than enemies
                         const targetEnemy = sortedEnemies[i % sortedEnemies.length]; 
                         
                         const start = origin.clone();
@@ -809,7 +897,6 @@
                         setTimeout(() => scene.remove(mesh), 200 + (powerLevel * 50));
                     }
                 } else {
-                    // Fallback to dumb fire if no enemies exist (unlikely but safe)
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
                     const geo = new THREE.CylinderGeometry(0.01 * powerLevel, 0.01 * powerLevel, 10);
                     geo.translate(0, 5, 0); 
@@ -841,22 +928,18 @@
                 const activeHand = hands[activeCastingHand === 'left' ? 0 : 1];
                 
                 if (activeHand && activeHand.userData.heldOrbs.length > 0) {
-                    
-                    // Filter orbs to only consume the ones matching the spell type
                     const matchingOrbs = activeHand.userData.heldOrbs.filter(o => o.userData.spellType === finalSpell);
 
                     if (matchingOrbs.length > 0) {
                         const origin = activeHand.joints['wrist'].position.clone();
                         const powerLevel = matchingOrbs.length;
                         
-                        // Consume ONLY the matching energy
                         matchingOrbs.forEach(orb => {
                             scene.remove(orb);
                             const index = orbs.indexOf(orb);
                             if(index > -1) orbs.splice(index, 1);
                         });
                         
-                        // Leave the rest in the gauntlet
                         activeHand.userData.heldOrbs = activeHand.userData.heldOrbs.filter(o => o.userData.spellType !== finalSpell);
                         updateStatsUI();
                         
@@ -875,12 +958,10 @@
                 const wristSpace = hand.joints['wrist'];
                 if (!wristSpace || !wristSpace.position) return; 
 
-                // HUD Gesture Check
                 if (isShaka(hand)) {
                     activeShakaHand = hand;
                 }
 
-                // Update Gauntlet Position
                 if (hand.userData.gauntletMesh) {
                     hand.userData.gauntletMesh.visible = true;
                     const offset = new THREE.Vector3(0, 0, 0.05).applyQuaternion(wristSpace.quaternion);
@@ -912,7 +993,6 @@
                 const pinching = isPinching(hand);
                 const wristPos = hand.joints['wrist'].position;
 
-                // Vent Energy (Drop) - Empties all stored orbs
                 if (hand.userData.heldOrbs.length > 0 && isClosed && !isDrawing) {
                     hand.userData.heldOrbs.forEach(orb => {
                         orb.userData.heldBy = null; 
@@ -924,7 +1004,6 @@
                     updateStatsUI();
                 }
 
-                // Absorb Energy
                 if (hand.userData.heldOrbs.length < MAX_HELD_ORBS && isOp && !activeShakaHand) {
                     for (let i = 0; i < orbs.length; i++) {
                         const orb = orbs[i];
@@ -940,7 +1019,6 @@
                     }
                 }
 
-                // Drawing logic
                 if (hand.userData.heldOrbs.length > 0) {
                     if (pinching) {
                         if (!isDrawing) {
@@ -973,12 +1051,10 @@
                 }
             });
 
-            // HUD Display Logic
             if (activeShakaHand && activeShakaHand.joints['wrist']) {
                 hudMesh.visible = true;
                 const wristPos = activeShakaHand.joints['wrist'].position;
                 
-                // Position HUD slightly above and forward of the wrist
                 const offset = new THREE.Vector3(0, 0.25, -0.1).applyQuaternion(activeShakaHand.joints['wrist'].quaternion);
                 hudMesh.position.copy(wristPos).add(offset);
                 hudMesh.lookAt(camera.position);
@@ -990,12 +1066,9 @@
         }
 
         function updateEntities(timeDelta, timeSeconds) {
-            
-            // --- WAVE SPAWNING LOGIC ---
             if (waveState === 'spawning') {
                 enemySpawnTimer -= timeDelta;
                 if (enemySpawnTimer <= 0 && enemiesSpawnedThisWave < enemiesTotalThisWave) {
-                    // Spawn rates accelerate smoothly across waves
                     enemySpawnTimer = Math.max(0.6, baseEnemySpawnRate - (currentWave * 0.4)); 
                     
                     const angle = Math.PI + (Math.random() * Math.PI); 
@@ -1003,7 +1076,6 @@
                     const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
                     
                     let type = 'drone';
-                    // Brutes do not appear until Wave 3
                     if (currentWave >= 3 && Math.random() < 0.05 + (currentWave * 0.05)) {
                         type = 'brute';
                     }
@@ -1012,10 +1084,9 @@
                     enemiesSpawnedThisWave++;
                 }
 
-                // Check Wave Completion
                 if (enemiesSpawnedThisWave >= enemiesTotalThisWave && enemies.length === 0) {
                     waveState = 'intermission';
-                    intermissionTimer = 5.0; // Giving you an extra second to breathe
+                    intermissionTimer = 5.0; 
                     const ann = document.getElementById('wave-announce');
                     ann.innerText = "WAVE CLEAR";
                     ann.style.opacity = 1;
@@ -1024,7 +1095,6 @@
                 intermissionTimer -= timeDelta;
                 if (intermissionTimer <= 0) {
                     currentWave++;
-                    // Difficulty Scales: W1(10), W2(20), W3(30)...
                     enemiesTotalThisWave = 10 * currentWave; 
                     enemiesSpawnedThisWave = 0;
                     waveState = 'spawning';
@@ -1036,7 +1106,6 @@
                 }
             }
 
-            // Spawn Ammo
             orbSpawnTimer -= timeDelta;
             if (orbSpawnTimer <= 0 && orbs.length < 10) { 
                 orbSpawnTimer = ORB_SPAWN_RATE;
@@ -1052,7 +1121,6 @@
 
             const heartPos = heartStone.position;
 
-            // Process Hostiles
             for (let i = enemies.length - 1; i >= 0; i--) {
                 let enemy = enemies[i];
 
@@ -1064,10 +1132,9 @@
                     enemy.rotation.x += 0.02;
                     enemy.rotation.y += 0.03;
 
-                    // Dynamic collision radius based on enemy size
                     const hitRadius = enemy.userData.type === 'brute' ? 0.6 : 0.4;
                     if (enemy.position.distanceTo(heartPos) < hitRadius) {
-                        damageHeartStone(enemy.userData.type === 'brute' ? 40 : 20); // Brutes hit harder
+                        damageHeartStone(enemy.userData.type === 'brute' ? 40 : 20); 
                         scene.remove(enemy);
                         enemies.splice(i, 1);
                     }
@@ -1080,8 +1147,14 @@
                 }
             }
 
-            // Process Ammo Orbs
+            // Process Ammo Orbs & inner symbol animations
             orbs.forEach(orb => {
+                if (orb.userData.innerSymbol) {
+                    // Constant magical tumbling for the inner symbol
+                    orb.userData.innerSymbol.rotation.y += timeDelta * 2;
+                    orb.userData.innerSymbol.rotation.z += timeDelta;
+                }
+
                 if (orb.userData.state === 'held') {
                     const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
                     const hand = hands[handIndex];
