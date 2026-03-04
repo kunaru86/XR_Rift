@@ -1,20 +1,17 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Quantum Resonance: Spatial Rift Shader</title>
-    <!-- Stick to 1.7.0, it has the most stable hand-tracking API -->
+    <title>Quantum Resonance: Core VR Loop</title>
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
     
     <script>
-      // 1. THE SPATIAL TEAR SHADER
+      // 1. THE SPATIAL TEAR SHADER (Kept the void, removed the AR alpha masking)
       AFRAME.registerShader('rift-void', {
         schema: {
           timeMsec: {type: 'time', is: 'uniform'},
           colorEdge: {type: 'color', is: 'uniform', default: '#00ffcc'}, 
-          // Changed from black to radioactive purple so you can actually see it in VR mode
-          colorVoid: {type: 'color', is: 'uniform', default: '#1a0044'}  
+          colorVoid: {type: 'color', is: 'uniform', default: '#050505'}  
         },
-
         vertexShader: `
           varying vec2 vUv;
           void main() {
@@ -22,31 +19,23 @@
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
-
         fragmentShader: `
           uniform float timeMsec;
           uniform vec3 colorEdge;
           uniform vec3 colorVoid;
           varying vec2 vUv;
 
-          float random(vec2 st) {
-              return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
-          }
-
+          float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
           float noise(vec2 st) {
-              vec2 i = floor(st);
-              vec2 f = fract(st);
-              float a = random(i);
-              float b = random(i + vec2(1.0, 0.0));
-              float c = random(i + vec2(0.0, 1.0));
-              float d = random(i + vec2(1.0, 1.0));
+              vec2 i = floor(st); vec2 f = fract(st);
+              float a = random(i); float b = random(i + vec2(1.0, 0.0));
+              float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
               vec2 u = f * f * (3.0 - 2.0 * f);
               return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
           }
 
           void main() {
             float time = timeMsec / 1000.0; 
-            
             vec2 p = vUv * 2.0 - 1.0;
             float r = length(p); 
             float a = atan(p.y, p.x); 
@@ -55,37 +44,91 @@
             float n = noise(vec2(cos(swirl), sin(swirl)) * 2.5 + time * 1.5);
             float distortedRadius = r + n * 0.3;
 
-            // Masking out the physical room
-            float alphaMask = 1.0 - smoothstep(0.7, 0.9, distortedRadius);
             float glowMask = smoothstep(0.5, 0.8, distortedRadius) * smoothstep(1.0, 0.8, distortedRadius);
-
             vec3 finalColor = mix(colorVoid, colorEdge, glowMask * 2.5);
             finalColor += colorEdge * noise(vec2(time * 20.0, a * 10.0)) * glowMask * 0.5;
 
-            gl_FragColor = vec4(finalColor, alphaMask);
+            // Hard cut for VR, no soft alpha bleed to the physical room
+            float alpha = step(distortedRadius, 0.9);
+            gl_FragColor = vec4(finalColor, alpha);
           }
         `
       });
 
-      // 2. THE SPATIAL TEAR MANAGER
+      // 2. PROJECTILE BEHAVIOR (The Hand Cannon Payload)
+      AFRAME.registerComponent('projectile-behavior', {
+        schema: {
+          direction: {type: 'vec3'},
+          speed: {type: 'number', default: 15}
+        },
+        tick: function(time, timeDelta) {
+          const deltaSec = timeDelta / 1000;
+          this.el.object3D.position.x += this.data.direction.x * this.data.speed * deltaSec;
+          this.el.object3D.position.y += this.data.direction.y * this.data.speed * deltaSec;
+          this.el.object3D.position.z += this.data.direction.z * this.data.speed * deltaSec;
+
+          // Garbage collection: delete if it flies too far
+          if (this.el.object3D.position.length() > 60) {
+            this.el.parentNode.removeChild(this.el);
+          }
+        }
+      });
+
+      // 3. FRACTAL PARASITE BEHAVIOR (The Threat)
+      AFRAME.registerComponent('parasite-behavior', {
+        tick: function(time, timeDelta) {
+          const camPos = new THREE.Vector3();
+          document.querySelector('a-camera').object3D.getWorldPosition(camPos);
+          const myPos = this.el.object3D.position;
+          
+          // Move towards the player's head
+          const direction = new THREE.Vector3().subVectors(camPos, myPos).normalize();
+          const speed = 1.2;
+          const deltaSec = timeDelta / 1000;
+
+          this.el.object3D.position.addScaledVector(direction, speed * deltaSec);
+          
+          // Spin menacingly
+          this.el.object3D.rotation.x += 0.05;
+          this.el.object3D.rotation.y += 0.05;
+
+          // Brutal O(n^2) collision check. We optimize this later if the headset melts.
+          const projectiles = document.querySelectorAll('[projectile-behavior]');
+          for (let i = 0; i < projectiles.length; i++) {
+            const p = projectiles[i];
+            if (p.object3D.position.distanceTo(myPos) < 0.4) {
+              // Target destroyed. Remove both entities.
+              this.el.parentNode.removeChild(this.el);
+              p.parentNode.removeChild(p);
+              
+              // Optional: You could spawn a particle explosion here later
+              console.log("Parasite eradicated.");
+              break; 
+            }
+          }
+        }
+      });
+
+      // 4. THE SPATIAL TEAR MANAGER (Now with enemy spawning)
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
           this.rightPinching = false;
           this.rift = document.querySelector('#dimensional-rift');
           this.camera = document.querySelector('a-camera');
+          this.lastSpawnTime = 0;
           
           const leftHand = document.querySelector('#leftHand');
           const rightHand = document.querySelector('#rightHand');
 
-          leftHand.addEventListener('pinchstarted', () => { this.leftPinching = true; console.log("Left pinch locked."); });
+          leftHand.addEventListener('pinchstarted', () => this.leftPinching = true);
           leftHand.addEventListener('pinchended', () => { this.leftPinching = false; this.collapseRift(); });
 
-          rightHand.addEventListener('pinchstarted', () => { this.rightPinching = true; console.log("Right pinch locked."); });
+          rightHand.addEventListener('pinchstarted', () => this.rightPinching = true);
           rightHand.addEventListener('pinchended', () => { this.rightPinching = false; this.collapseRift(); });
         },
         
-        tick: function () {
+        tick: function (time) {
           if (this.leftPinching && this.rightPinching) {
             const leftEl = document.querySelector('#leftHand');
             const rightEl = document.querySelector('#rightHand');
@@ -96,10 +139,7 @@
             rightEl.object3D.getWorldPosition(rightPos);
             
             const distance = leftPos.distanceTo(rightPos);
-            
-            // Removed the deadzone. The rift now scales immediately with distance. multiplier increased to 5.
             const tearScale = distance * 5; 
-            
             const midPoint = new THREE.Vector3().addVectors(leftPos, rightPos).multiplyScalar(0.5);
             
             this.rift.object3D.position.copy(midPoint);
@@ -108,9 +148,25 @@
             const camPos = new THREE.Vector3();
             this.camera.object3D.getWorldPosition(camPos);
             this.rift.object3D.lookAt(camPos);
-            
             this.rift.setAttribute('material', 'transparent: true; opacity: 1');
+
+            // SPAWN LOGIC: If the rift is ripped wide open (>1.0 scale), spawn parasites
+            if (tearScale > 1.0 && time - this.lastSpawnTime > 800) {
+              this.spawnParasite(midPoint);
+              this.lastSpawnTime = time;
+            }
           }
+        },
+
+        spawnParasite: function(position) {
+          const parasite = document.createElement('a-entity');
+          // Using an octahedron as a low-poly threat
+          parasite.setAttribute('geometry', 'primitive: octahedron; radius: 0.15');
+          parasite.setAttribute('material', 'color: #ff0044; wireframe: true');
+          // Spawn slightly in front of the rift so they don't clip into it
+          parasite.setAttribute('position', `${position.x} ${position.y} ${position.z + 0.2}`);
+          parasite.setAttribute('parasite-behavior', '');
+          this.el.sceneEl.appendChild(parasite);
         },
 
         collapseRift: function() {
@@ -119,11 +175,12 @@
         }
       });
 
-      // 3. THE KINETIC RECOIL CANNON
+      // 5. THE KINETIC RECOIL CANNON (Now actually shoots)
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.previousPosition = new THREE.Vector3();
           this.cooldown = false;
+          this.camera = document.querySelector('a-camera');
         },
         
         tick: function (time, timeDelta) {
@@ -135,29 +192,45 @@
           const velocityY = (currentPosition.y - this.previousPosition.y) / timeDelta;
           
           if (velocityY > 0.006) { 
-            this.fireCannon();
+            this.fireCannon(currentPosition);
           }
           
           this.previousPosition.copy(currentPosition);
         },
 
-        fireCannon: function() {
-          console.log("BOOM. Kinetic payload delivered.");
+        fireCannon: function(handPos) {
           this.cooldown = true;
-          setTimeout(() => { this.cooldown = false; }, 400);
+          
+          const projectile = document.createElement('a-entity');
+          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.05');
+          projectile.setAttribute('material', 'color: #00ffcc; shader: flat');
+          projectile.setAttribute('position', handPos);
+
+          // Calculate gaze direction for reliable aiming
+          const direction = new THREE.Vector3();
+          this.camera.object3D.getWorldDirection(direction);
+          direction.multiplyScalar(-1); // WebGL forward is -Z
+
+          projectile.setAttribute('projectile-behavior', `direction: ${direction.x} ${direction.y} ${direction.z}`);
+          this.el.sceneEl.appendChild(projectile);
+
+          // 300ms fire rate limit
+          setTimeout(() => { this.cooldown = false; }, 300);
         }
       });
     </script>
   </head>
   <body>
-    <!-- Fallback background added. In VR, it's grey. In AR, transparent overrides it. -->
-    <!-- Simplified WebXR request to prevent AR button from failing on strict headsets -->
-    <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #444444; transparent: true" rift-manager>
+    <!-- Standard VR Scene -->
+    <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #111111" rift-manager>
       
+      <!-- Spatial depth cues: A wireframe floor to ground the user -->
+      <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222222" material="wireframe: true"></a-plane>
+
       <!-- Dimensional Rift Plane -->
       <a-entity id="dimensional-rift" 
                 geometry="primitive: plane; width: 1; height: 1" 
-                material="shader: rift-void; transparent: true; side: double; depthWrite: false" 
+                material="shader: rift-void; transparent: true; side: double" 
                 scale="0 0 0">
       </a-entity>
 
