@@ -1,944 +1,293 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Quantum Resonance: Floating Sector</title>
-  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
-  <script>
-    /* ================================================================
-       QUANTUM RESONANCE: FLOATING SECTOR  —  v3.0
-       ================================================================
-       0. QuantumAudio      — Web Audio synth engine
-       1. game-manager      — System: state, score, health, waves, FX
-       2. rift-void         — GLSL shader for the dimensional tear
-       3. floating-level    — Environment: platforms, stars, particles
-       4. projectile-behavior — Fired plasma bolts
-       5. parasite-behavior — Rift-spawned hunters
-       6. rift-manager      — Pinch-to-tear gesture handler
-       7. hand-cannon       — Per-hand gun pose + firing
-    ================================================================ */
-
-
-    /* ──────────────────────────────────────────────────────────────
-       0.  QUANTUM AUDIO  — pure Web Audio synthesis, zero deps
-    ────────────────────────────────────────────────────────────── */
-    class QuantumAudio {
-      constructor() { this.ctx = null; }
-
-      _boot() {
-        if (this.ctx) return;
-        try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
-      }
-
-      _tone(freq, endFreq, dur, vol, wave = 'sawtooth', delayMs = 0) {
-        this._boot();
-        if (!this.ctx) return;
-        setTimeout(() => {
-          const osc  = this.ctx.createOscillator();
-          const gain = this.ctx.createGain();
-          const t    = this.ctx.currentTime;
-          osc.type   = wave;
-          osc.frequency.setValueAtTime(freq, t);
-          if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, t + dur);
-          gain.gain.setValueAtTime(vol, t);
-          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-          osc.connect(gain);
-          gain.connect(this.ctx.destination);
-          osc.start(t);
-          osc.stop(t + dur + 0.02);
-        }, delayMs);
-      }
-
-      shoot()     { this._tone(1400, 350,  0.07, 0.22, 'sawtooth'); }
-      hit()       { this._tone(280,  900,  0.14, 0.40, 'square');
-                    this._tone(560,  1400, 0.09, 0.28, 'square', 80); }
-      damage()    { this._tone(110,  55,   0.45, 0.55, 'sawtooth'); }
-      waveClear() { [440,550,660,880].forEach((f,i) =>
-                      this._tone(f, f*1.25, 0.22, 0.32, 'sine', i*130)); }
-      gameOver()  { [480,380,280,180,90].forEach((f,i) =>
-                      this._tone(f, f*0.6, 0.38, 0.40, 'sawtooth', i*190)); }
-    }
-
-
-    /* ──────────────────────────────────────────────────────────────
-       1.  GAME MANAGER SYSTEM
-           Owns: targets[], projectiles[], platformGroups[]
-                 score, health, wave, comboCount, state
-           Exposes: register/unregister, addScore, takeDamage,
-                    spawnExplosion, setPlatformGroups
-    ────────────────────────────────────────────────────────────── */
-    AFRAME.registerSystem('game-manager', {
-      init() {
-        this.targets       = [];
-        this.projectiles   = [];
-        this.platformGroups = [];
-        this.score         = 0;
-        this.health        = 3;
-        this.wave          = 1;
-        this.comboCount    = 0;
-        this.state         = 'playing';   // 'playing' | 'wave_clear' | 'gameover'
-        this.audio         = new QuantumAudio();
-        this._comboTimer   = null;
-        this._comboHideT   = null;
-
-        /* Grab HUD refs once the scene has finished loading */
-        this.el.addEventListener('loaded', () => {
-          this.scoreEl      = document.querySelector('#score-display');
-          this.healthEl     = document.querySelector('#health-display');
-          this.waveEl       = document.querySelector('#wave-display');
-          this.comboEl      = document.querySelector('#combo-display');
-          this.overlayEl    = document.querySelector('#game-overlay');
-          this.overlayTxtEl = document.querySelector('#overlay-text');
-          this.damageEl     = document.querySelector('#damage-overlay');
-          this._updateHUD();
-        });
-      },
-
-      /* ── Registration ─────────────────────────────────────── */
-      registerTarget(t)       { this.targets.push(t); },
-      unregisterTarget(t)     { const i = this.targets.indexOf(t);     if (i>-1) this.targets.splice(i,1); },
-      registerProjectile(p)   { this.projectiles.push(p); },
-      unregisterProjectile(p) { const i = this.projectiles.indexOf(p); if (i>-1) this.projectiles.splice(i,1); },
-      setPlatformGroups(gs)   { this.platformGroups = [...gs]; },
-
-      /* ── Score & Combo ────────────────────────────────────── */
-      addScore() {
-        if (this.state !== 'playing') return;
-        this.comboCount++;
-        clearTimeout(this._comboTimer);
-        this._comboTimer = setTimeout(() => { this.comboCount = 0; }, 2200);
-
-        const pts = 100 * this.comboCount * this.wave;
-        this.score += pts;
-        this.audio.hit();
-        this._updateHUD();
-        if (this.comboCount > 1) this._flashCombo(this.comboCount, pts);
-        if (this.targets.length === 0) this._waveClear();
-      },
-
-      /* ── Health ───────────────────────────────────────────── */
-      takeDamage() {
-        if (this.state !== 'playing') return;
-        this.health--;
-        this.audio.damage();
-        this._updateHUD();
-        this._flashDamage();
-        if (this.health <= 0) this._gameOver();
-      },
-
-      /* ── Wave System ──────────────────────────────────────── */
-      _waveClear() {
-        if (this.state !== 'playing') return;
-        this.state = 'wave_clear';
-        this.comboCount = 0;
-        this.audio.waveClear();
-        this._showOverlay(`SECTOR CLEARED\nWAVE ${this.wave} COMPLETE`, '#00ffcc');
-        setTimeout(() => {
-          if (this.state !== 'wave_clear') return;
-          this._hideOverlay();
-          this.wave++;
-          this._spawnWave();
-          this.state = 'playing';
-          this._updateHUD();
-        }, 3200);
-      },
-
-      _spawnWave() {
-        this.platformGroups.forEach(group => {
-          if (group.position.z >= -1) return;          // skip the start pad
-          group.userData.targets = [];                  // clear stale refs
-          const h     = group.userData.platformH || 0.8;
-          const count = this.wave >= 3 ? 2 : 1;        // 2 targets/platform from wave 3
-          for (let c = 0; c < count; c++) {
-            const tGeo = new THREE.OctahedronGeometry(0.4);
-            const tMat = new THREE.MeshStandardMaterial({
-              color: 0xff0044, emissive: 0xaa0022, wireframe: true
-            });
-            const target = new THREE.Mesh(tGeo, tMat);
-            const ox = c === 0 ? 0 : (Math.random() - 0.5) * 1.4;
-            target.position.set(ox, h + 1.2 + c * 0.9, 0);
-            target.userData.waveSpeed = 0.04 + this.wave * 0.012;
-            group.add(target);
-            group.userData.targets.push(target);
-            this.registerTarget(target);
-          }
-        });
-      },
-
-      _gameOver() {
-        this.state = 'gameover';
-        this.audio.gameOver();
-        this._showOverlay(`SYSTEM FAILURE\nFINAL SCORE: ${this.score}`, '#ff3366');
-      },
-
-      /* ── Visual Effects ───────────────────────────────────── */
-      spawnExplosion(pos) {
-        const scene = this.el;
-
-        const flash = document.createElement('a-entity');
-        flash.setAttribute('geometry', 'primitive: sphere; radius: 0.14');
-        flash.setAttribute('material', 'color: #ff6600; shader: flat; transparent: true');
-        flash.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
-        flash.setAttribute('animation__s', 'property: scale; from: 1 1 1; to: 7 7 7; dur: 320; easing: easeOutExpo');
-        flash.setAttribute('animation__f', 'property: material.opacity; from: 1; to: 0; dur: 320; easing: easeOutQuad');
-        scene.appendChild(flash);
-
-        const ring = document.createElement('a-entity');
-        ring.setAttribute('geometry', 'primitive: torus; radius: 0.1; radiusTubular: 0.014; segmentsRadial: 16');
-        ring.setAttribute('material', 'color: #00ffcc; shader: flat; transparent: true');
-        ring.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
-        ring.setAttribute('animation__s', 'property: scale; from: 1 1 1; to: 12 12 12; dur: 480; easing: easeOutQuad');
-        ring.setAttribute('animation__f', 'property: material.opacity; from: 0.85; to: 0; dur: 480; easing: easeOutQuad');
-        scene.appendChild(ring);
-
-        const ptl = document.createElement('a-light');
-        ptl.setAttribute('type', 'point');
-        ptl.setAttribute('color', '#ff6600');
-        ptl.setAttribute('intensity', '5');
-        ptl.setAttribute('distance', '9');
-        ptl.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
-        ptl.setAttribute('animation', 'property: light.intensity; from: 5; to: 0; dur: 380');
-        scene.appendChild(ptl);
-
-        setTimeout(() => {
-          [flash, ring, ptl].forEach(el => el.parentNode && el.parentNode.removeChild(el));
-        }, 520);
-      },
-
-      /* ── HUD Helpers ──────────────────────────────────────── */
-      _updateHUD() {
-        this.scoreEl  && this.scoreEl.setAttribute('value',  `SCORE  ${String(this.score).padStart(7,'0')}`);
-        this.healthEl && this.healthEl.setAttribute('value', '♥'.repeat(Math.max(0,this.health)) + '♡'.repeat(Math.max(0,3-this.health)));
-        this.waveEl   && this.waveEl.setAttribute('value',   `WAVE  ${this.wave}`);
-      },
-
-      _flashCombo(count, pts) {
-        if (!this.comboEl) return;
-        this.comboEl.setAttribute('value',   `${count}× COMBO  +${pts}`);
-        this.comboEl.setAttribute('visible', 'true');
-        this.comboEl.setAttribute('animation__s',
-          'property: scale; from: 0.4 0.4 1; to: 1.3 1.3 1; dur: 160; easing: easeOutBack');
-        clearTimeout(this._comboHideT);
-        this._comboHideT = setTimeout(() => {
-          if (!this.comboEl) return;
-          this.comboEl.setAttribute('animation__f',
-            'property: scale; to: 0 0 1; dur: 200; easing: easeInBack');
-          setTimeout(() => this.comboEl && this.comboEl.setAttribute('visible','false'), 220);
-        }, 1400);
-      },
-
-      _showOverlay(text, color) {
-        if (!this.overlayEl) return;
-        this.overlayTxtEl && this.overlayTxtEl.setAttribute('value', text);
-        this.overlayTxtEl && this.overlayTxtEl.setAttribute('color', color);
-        this.overlayEl.setAttribute('visible', 'true');
-      },
-      _hideOverlay() { this.overlayEl && this.overlayEl.setAttribute('visible','false'); },
-
-      _flashDamage() {
-        if (!this.damageEl) return;
-        this.damageEl.setAttribute('material',
-          'color: #ff0000; transparent: true; opacity: 0.55; shader: flat');
-        setTimeout(() => {
-          this.damageEl && this.damageEl.setAttribute('animation',
-            'property: material.opacity; to: 0; dur: 700; easing: easeOutQuad');
-        }, 60);
-      }
-    });
-
-
-    /* ──────────────────────────────────────────────────────────────
-       2.  SPATIAL TEAR SHADER  —  rift-void
-    ────────────────────────────────────────────────────────────── */
-    AFRAME.registerShader('rift-void', {
-      schema: {
-        timeMsec:  { type:'time',  is:'uniform' },
-        colorEdge: { type:'color', is:'uniform', default:'#00ffcc' },
-        colorVoid: { type:'color', is:'uniform', default:'#050505' }
-      },
-      vertexShader:`
-        varying vec2 vUv;
-        void main(){
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-        }`,
-      fragmentShader:`
-        uniform float timeMsec;
-        uniform vec3  colorEdge;
-        uniform vec3  colorVoid;
-        varying vec2  vUv;
-
-        float random(vec2 st){ return fract(sin(dot(st,vec2(12.9898,78.233)))*43758.5453); }
-        float noise(vec2 st){
-          vec2 i=floor(st),f=fract(st);
-          float a=random(i),b=random(i+vec2(1,0)),c=random(i+vec2(0,1)),d=random(i+vec2(1,1));
-          vec2 u=f*f*(3.0-2.0*f);
-          return mix(a,b,u.x)+(c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y;
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echo Weaver - Phase 1</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: monospace; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
         }
-
-        void main(){
-          float time = timeMsec/1000.0;
-          vec2  p    = vUv*2.0-1.0;
-          float r    = length(p);
-          float a    = atan(p.y,p.x);
-          float swirl= a + time*3.0 - r*4.0;
-          float n    = noise(vec2(cos(swirl),sin(swirl))*2.5 + time*1.5);
-          float dr   = r + n*0.3;
-
-          float glow = smoothstep(0.5,0.8,dr)*smoothstep(1.0,0.8,dr);
-          vec3  col  = mix(colorVoid, colorEdge, glow*2.5);
-          col += colorEdge * noise(vec2(time*20.0, a*10.0)) * glow * 0.5;
-
-          /* Soft edge — replaces the hard step() from v1 */
-          float alpha = smoothstep(0.96, 0.68, dr);
-          gl_FragColor = vec4(col, alpha);
-        }`
-    });
-
-
-    /* ──────────────────────────────────────────────────────────────
-       3.  FLOATING LEVEL  —  environment generator
-    ────────────────────────────────────────────────────────────── */
-    AFRAME.registerComponent('floating-level', {
-      init() {
-        this.sys   = this.el.sceneEl.systems['game-manager'];
-        const scene = this.el.sceneEl.object3D;
-
-        /* Sky & fog */
-        scene.background = new THREE.Color(0x070b17);
-        scene.fog        = new THREE.FogExp2(0x070b17, 0.024);
-
-        /* Lights */
-        scene.add(new THREE.AmbientLight(0x283050, 1));
-        const dir  = new THREE.DirectionalLight(0xfff5e6, 1.2); dir.position.set(5,20,10); scene.add(dir);
-        const fill = new THREE.PointLight(0x4466ff, 0.7); fill.position.set(-6,0,5); scene.add(fill);
-        const back = new THREE.PointLight(0xffaa66, 0.45); back.position.set(0,5,-16); scene.add(back);
-
-        /* Distant nebula backdrop */
-        const nebula = new THREE.Mesh(
-          new THREE.SphereGeometry(88, 12, 12),
-          new THREE.MeshBasicMaterial({ color:0x12082a, side:THREE.BackSide, transparent:true, opacity:0.7 })
-        );
-        scene.add(nebula);
-
-        /* Stars */
-        const sp = new Float32Array(3000);
-        for (let i=0;i<3000;i++) sp[i]=(Math.random()-0.5)*220;
-        const sGeo = new THREE.BufferGeometry();
-        sGeo.setAttribute('position', new THREE.BufferAttribute(sp,3));
-        this.stars = new THREE.Points(sGeo, new THREE.PointsMaterial({color:0xffffff, size:0.18}));
-        this.stars.frustumCulled = false;
-        scene.add(this.stars);
-
-        /* Platforms */
-        this.platformGroup = new THREE.Group();
-        const data = [
-          /* [w, d, h, color,  x,   y,   z]  */
-          [6,   6,   1.5, 0x4a90e2,  0,  2,    0],   // start pad
-          [2.5, 2.5, 0.8, 0xe67e22, -3,  3.5,  -6],
-          [2.5, 2.5, 0.8, 0xe67e22,  0,  4.0,  -8],
-          [2.5, 2.5, 0.8, 0xe67e22,  3,  3.5,  -6],
-          [2,   2,   0.6, 0x2ecc71, -5,  5.0, -10],
-          [2,   2,   0.6, 0x2ecc71,  5,  4.5,  -9],
-          [3,   3,   1.0, 0xf1c40f, -2,  6.0, -12],
-          [3,   3,   1.0, 0xf1c40f,  2,  5.0, -12],
-          [1.5, 1.5, 0.5, 0xe74c3c, -4,  8.0, -15],
-          [1.5, 1.5, 0.5, 0xe74c3c,  4,  7.5, -14]
-        ];
-
-        data.forEach(([w,d,h,color,x,y,z]) => {
-          const group = new THREE.Group();
-          group.position.set(x, y, z);   // ← fixed: group carries world position
-
-          /* Platform body */
-          const geo = new THREE.BoxGeometry(w,h,d);
-          const mat = new THREE.MeshStandardMaterial({
-            color, emissive: new THREE.Color(color).multiplyScalar(0.18),
-            roughness:0.38, metalness:0.25
-          });
-          const cube = new THREE.Mesh(geo, mat);
-          cube.position.set(0, h/2, 0);  // ← local to group: top surface = h
-          group.add(cube);
-
-          /* Wireframe edges */
-          const eLine = new THREE.LineSegments(
-            new THREE.EdgesGeometry(geo),
-            new THREE.LineBasicMaterial({color:0xffffff, transparent:true, opacity:0.35})
-          );
-          eLine.position.copy(cube.position);
-          group.add(eLine);
-
-          /* Hover glow ring (depth-perception aid + looks great) */
-          if (z < -1) {
-            const glowMat = new THREE.MeshBasicMaterial({
-              color, transparent:true, opacity:0.2, side:THREE.DoubleSide
-            });
-            const glow = new THREE.Mesh(new THREE.RingGeometry(w*0.28, w*0.52, 32), glowMat);
-            glow.rotation.x = -Math.PI/2;
-            glow.position.set(0, 0.02, 0);
-            group.add(glow);
-            group.userData.glowMat = glowMat;
-
-            /* Initial wave-1 target */
-            const tGeo = new THREE.OctahedronGeometry(0.4);
-            const tMat = new THREE.MeshStandardMaterial({color:0xff0044, emissive:0xaa0022, wireframe:true});
-            const target = new THREE.Mesh(tGeo, tMat);
-            target.position.set(0, h+1.2, 0);
-            target.userData.waveSpeed = 0.05;
-            group.add(target);
-            group.userData.targets     = [target];
-            group.userData.platformH   = h;
-            this.sys.registerTarget(target);
-          }
-
-          group.userData.originalY = y;
-          group.userData.speed     = 0.38 + Math.random()*0.48;
-          group.userData.offset    = Math.random()*Math.PI*2;
-          this.platformGroup.add(group);
-        });
-
-        scene.add(this.platformGroup);
-        this.sys.setPlatformGroups(this.platformGroup.children);
-
-        /* Ambient particles */
-        const pp = new Float32Array(900);
-        for (let i=0;i<300;i++){
-          const r=8+Math.random()*13, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
-          pp[i*3]   = Math.sin(ph)*Math.cos(th)*r;
-          pp[i*3+1] = Math.sin(ph)*Math.sin(th)*r*0.5+6;
-          pp[i*3+2] = Math.cos(ph)*r;
-        }
-        const pGeo = new THREE.BufferGeometry();
-        pGeo.setAttribute('position', new THREE.BufferAttribute(pp,3));
-        this.particles = new THREE.Points(pGeo,
-          new THREE.PointsMaterial({color:0xaaccff,size:0.08,transparent:true,opacity:0.38}));
-        this.particles.frustumCulled = false;
-        scene.add(this.particles);
-      },
-
-      tick(time) {
-        const t = time/1000;
-        this.platformGroup.children.forEach(child => {
-          /* Bob up and down */
-          child.position.y = child.userData.originalY +
-            Math.sin(t * child.userData.speed + child.userData.offset) * 0.18;
-          /* Slow drift rotation */
-          child.rotation.y += 0.0018;
-
-          /* Animate targets */
-          if (child.userData.targets) {
-            child.userData.targets.forEach(tgt => {
-              if (!tgt.parent) return;
-              tgt.rotation.y += tgt.userData.waveSpeed || 0.05;
-              tgt.rotation.x += 0.022;
-            });
-          }
-
-          /* Pulse glow ring opacity */
-          if (child.userData.glowMat) {
-            child.userData.glowMat.opacity =
-              0.12 + 0.12 * Math.sin(t*2.2 + child.userData.offset);
-          }
-        });
-        this.stars.rotation.y    += 0.00007;
-        this.stars.rotation.x    += 0.000035;
-        this.particles.rotation.y -= 0.00025;
-      }
-    });
-
-
-    /* ──────────────────────────────────────────────────────────────
-       4.  PROJECTILE BEHAVIOR
-           — no per-tick allocations; uses game-manager system
-    ────────────────────────────────────────────────────────────── */
-    AFRAME.registerComponent('projectile-behavior', {
-      schema: {
-        direction: { type:'vec3' },
-        speed:     { type:'number', default:16 }
-      },
-      init() {
-        this.sys     = this.el.sceneEl.systems['game-manager'];
-        this._myPos  = new THREE.Vector3();
-        this._tgtPos = new THREE.Vector3();
-        this.sys.registerProjectile(this.el);
-      },
-      remove() { this.sys && this.sys.unregisterProjectile(this.el); },
-      tick(time, dt) {
-        if (!this.el.parentNode) return;
-        const s = dt/1000;
-        const p = this.el.object3D.position;
-        const d = this.data.direction;
-        p.x += d.x * this.data.speed * s;
-        p.y += d.y * this.data.speed * s;
-        p.z += d.z * this.data.speed * s;
-        this.el.object3D.getWorldPosition(this._myPos);
-
-        if (this._myPos.length() > 85) { this._die(); return; }
-
-        const targets = this.sys.targets;
-        for (let i=targets.length-1; i>=0; i--) {
-          const t = targets[i];
-          if (!t.parent) { this.sys.unregisterTarget(t); continue; }
-          t.getWorldPosition(this._tgtPos);
-          if (this._tgtPos.distanceTo(this._myPos) < 0.78) {
-            this.sys.spawnExplosion(this._tgtPos);
-            this.sys.addScore();
-            /* Remove from group userData */
-            if (t.parent.userData.targets) {
-              t.parent.userData.targets = t.parent.userData.targets.filter(x => x!==t);
+    </style>
+    <!-- Import maps polyfill -->
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
             }
-            t.parent.remove(t);
-            this.sys.unregisterTarget(t);
-            this._die();
-            return;
-          }
         }
-      },
-      _die() { if (this.el.parentNode) this.el.parentNode.removeChild(this.el); }
-    });
-
-
-    /* ──────────────────────────────────────────────────────────────
-       5.  PARASITE BEHAVIOR
-           — chases camera, accelerates with age, damages on contact
-    ────────────────────────────────────────────────────────────── */
-    AFRAME.registerComponent('parasite-behavior', {
-      init() {
-        this.sys    = this.el.sceneEl.systems['game-manager'];
-        this.camera = document.querySelector('a-camera');
-        this._cam   = new THREE.Vector3();
-        this._mine  = new THREE.Vector3();
-        this._dir   = new THREE.Vector3();
-        this._pPos  = new THREE.Vector3();
-        this._born  = performance.now();
-      },
-      tick(time, dt) {
-        if (!this.el.parentNode) return;
-        this.camera.object3D.getWorldPosition(this._cam);
-        this.el.object3D.getWorldPosition(this._mine);
-
-        /* Accelerates over time, capped at 2.8 m/s */
-        const age   = (performance.now() - this._born) / 1000;
-        const speed = Math.min(1.2 + age*0.12, 2.8);
-
-        this._dir.subVectors(this._cam, this._mine).normalize();
-        this.el.object3D.position.addScaledVector(this._dir, speed * dt/1000);
-        this.el.object3D.rotation.x += 0.07;
-        this.el.object3D.rotation.y += 0.09;
-
-        const dist = this._mine.distanceTo(this._cam);
-
-        /* Proximity warning — parasite turns brighter red as it closes in */
-        if (dist < 2.0) {
-          const pulse = 0.45 + 0.55 * Math.sin(time * 0.025);
-          this.el.setAttribute('material',
-            `color: #ff0044; emissive: #ff0044; emissiveIntensity: ${pulse.toFixed(2)}`);
-        }
-
-        /* Hit player */
-        if (dist < 0.55) {
-          this.sys.takeDamage();
-          this.sys.spawnExplosion(this._mine);
-          this.el.parentNode.removeChild(this.el);
-          return;
-        }
-
-        /* Hit by projectile */
-        const projs = this.sys.projectiles;
-        for (let i=0; i<projs.length; i++) {
-          const p = projs[i];
-          if (!p.object3D) continue;
-          p.object3D.getWorldPosition(this._pPos);
-          if (this._pPos.distanceTo(this._mine) < 0.52) {
-            this.sys.spawnExplosion(this._mine);
-            this.sys.addScore();
-            if (p.parentNode) p.parentNode.removeChild(p);
-            if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
-            return;
-          }
-        }
-      }
-    });
-
-
-    /* ──────────────────────────────────────────────────────────────
-       6.  RIFT MANAGER
-           — pinch both hands simultaneously to open a spatial tear
-           — tear spawns parasites; rate increases per wave
-    ────────────────────────────────────────────────────────────── */
-    AFRAME.registerComponent('rift-manager', {
-      init() {
-        this.sys           = this.el.sceneEl.systems['game-manager'];
-        this.leftPinching  = false;
-        this.rightPinching = false;
-        this.lastSpawn     = 0;
-        this.rift          = document.querySelector('#dimensional-rift');
-        this.camera        = document.querySelector('a-camera');
-        this._leftEl       = null;
-        this._rightEl      = null;
-
-        /* Cached vectors — zero allocs in tick() */
-        this._lPos  = new THREE.Vector3();
-        this._rPos  = new THREE.Vector3();
-        this._mid   = new THREE.Vector3();
-        this._camP  = new THREE.Vector3();
-
-        this.el.addEventListener('loaded', () => {
-          this._leftEl  = document.querySelector('#leftHand');
-          this._rightEl = document.querySelector('#rightHand');
-          if (!this._leftEl || !this._rightEl) return;
-
-          this._leftEl.addEventListener('pinchstarted',  () => this.leftPinching  = true);
-          this._leftEl.addEventListener('pinchended',    () => { this.leftPinching  = false; this._collapse(); });
-          this._rightEl.addEventListener('pinchstarted', () => this.rightPinching = true);
-          this._rightEl.addEventListener('pinchended',   () => { this.rightPinching = false; this._collapse(); });
-        });
-      },
-
-      tick(time) {
-        if (!this.leftPinching || !this.rightPinching) return;
-        if (!this._leftEl || !this._rightEl) return;
-
-        this._leftEl.object3D.getWorldPosition(this._lPos);
-        this._rightEl.object3D.getWorldPosition(this._rPos);
-
-        const dist  = this._lPos.distanceTo(this._rPos);
-        const scale = Math.max(0.1, dist * 5);
-
-        this._mid.addVectors(this._lPos, this._rPos).multiplyScalar(0.5);
-        this.rift.object3D.position.copy(this._mid);
-        this.rift.object3D.scale.set(scale, scale, 1);
-        this.rift.object3D.visible = true;
-        this.camera.object3D.getWorldPosition(this._camP);
-        this.rift.object3D.lookAt(this._camP);
-
-        /* Spawn rate tightens each wave (floor: 380 ms) */
-        const interval = Math.max(380, 1300 - this.sys.wave * 100);
-        if (scale > 1.0 && time - this.lastSpawn > interval) {
-          this._spawnParasite(this._mid);
-          this.lastSpawn = time;
-        }
-      },
-
-      _spawnParasite(pos) {
-        if (this.sys.state !== 'playing') return;
-        const p = document.createElement('a-entity');
-        p.setAttribute('geometry', 'primitive: octahedron; radius: 0.15');
-        p.setAttribute('material', 'color: #ff0044; emissive: #880022; wireframe: true');
-        p.setAttribute('position', `${pos.x} ${pos.y} ${pos.z + 0.3}`);
-        p.setAttribute('parasite-behavior', '');
-        this.el.sceneEl.appendChild(p);
-      },
-
-      _collapse() {
-        this.rift.object3D.scale.set(0,0,0);
-        this.rift.object3D.visible = false;
-      }
-    });
-
-
-    /* ──────────────────────────────────────────────────────────────
-       7.  HAND CANNON
-           Pose: index + middle extended, ring + pinky curled
-           Fire: thumb tip drops to index knuckle (hammer gesture)
-           — tracer streak, muzzle flash, audio, haptics
-           — all tick vectors cached in init()
-    ────────────────────────────────────────────────────────────── */
-    AFRAME.registerComponent('hand-cannon', {
-      init() {
-        this.cooldown = false;
-        this.sys      = this.el.sceneEl.systems['game-manager'];
-
-        /* ── Gun barrel ──────────────────────────────────────── */
-        this.barrel = document.createElement('a-entity');
-        this.barrel.setAttribute('geometry', 'primitive: cylinder; radius: 0.013; height: 0.18');
-        this.barrel.setAttribute('material', 'color: #0088ff; wireframe: true; emissive: #003366');
-        this.barrel.setAttribute('rotation', '90 0 0');
-        this.el.appendChild(this.barrel);
-
-        /* ── Muzzle flash ────────────────────────────────────── */
-        this.muzzle = document.createElement('a-entity');
-        this.muzzle.setAttribute('geometry', 'primitive: sphere; radius: 0.065');
-        this.muzzle.setAttribute('material', 'color: #00ffff; shader: flat');
-        this.muzzle.setAttribute('position', '0 0.1 0');
-        this.muzzle.setAttribute('visible', 'false');
-        this.barrel.appendChild(this.muzzle);
-
-        /* ── Laser sight ─────────────────────────────────────── */
-        const laserCyl = document.createElement('a-entity');
-        laserCyl.setAttribute('geometry', 'primitive: cylinder; radius: 0.003; height: 20');
-        laserCyl.setAttribute('material', 'color: #ff0044; shader: flat; transparent: true; opacity: 0.42');
-        laserCyl.setAttribute('rotation', '90 0 0');
-        laserCyl.setAttribute('position', '0 0 -10');
-        this.laserPivot = document.createElement('a-entity');
-        this.laserPivot.appendChild(laserCyl);
-        this.laserPivot.setAttribute('visible', false);
-        this.el.appendChild(this.laserPivot);
-
-        /* ── Cached vectors (zero alloc in tick) ─────────────── */
-        this._wrist   = new THREE.Vector3();
-        this._thumb   = new THREE.Vector3();
-        this._idxBase = new THREE.Vector3();
-        this._idxTip  = new THREE.Vector3();
-        this._midTip  = new THREE.Vector3();
-        this._ringTip = new THREE.Vector3();
-        this._pinky   = new THREE.Vector3();
-        this._aim     = new THREE.Vector3();
-        this._look    = new THREE.Vector3();
-        /* Fire helper vectors */
-        this._tMid    = new THREE.Vector3();
-        this._tUp     = new THREE.Vector3(0,1,0);
-        this._tQuat   = new THREE.Quaternion();
-
-        /* ── Hand mesh tint ──────────────────────────────────── */
-        this.handMesh    = null;
-        this.defColor    = null;
-        this.el.addEventListener('model-loaded', () => {
-          const mesh = this.el.getObject3D('mesh');
-          if (!mesh) return;
-          mesh.traverse(n => {
-            if (n.isMesh && n.material) {
-              this.handMesh = n;
-              this.handMesh.material = n.material.clone();
-              this.defColor = this.handMesh.material.color.clone();
-            }
-          });
-        });
-      },
-
-      tick(time) {
-        const tc = this.el.components['hand-tracking-controls'];
-        if (!tc || !tc.bones || tc.bones.length === 0) return;
-        const b = tc.bones;
-
-        /* Bone world positions */
-        b[0].getWorldPosition(this._wrist);
-        b[4].getWorldPosition(this._thumb);
-        b[5].getWorldPosition(this._idxBase);
-        b[9].getWorldPosition(this._idxTip);
-        b[14].getWorldPosition(this._midTip);
-        b[19].getWorldPosition(this._ringTip);
-        b[24].getWorldPosition(this._pinky);
-
-        /* Aim vector: index knuckle → index tip (removes wrist-angle drift) */
-        this._aim.subVectors(this._idxTip, this._idxBase).normalize();
-
-        /* Snap barrel to index finger */
-        this.barrel.object3D.position.copy(this._idxBase);
-        this.barrel.object3D.lookAt(this._idxTip);
-
-        /* Finger extension lengths */
-        const iLen = this._idxTip.distanceTo(this._wrist);
-        const mLen = this._midTip.distanceTo(this._wrist);
-        const rLen = this._ringTip.distanceTo(this._wrist);
-        const pLen = this._pinky.distanceTo(this._wrist);
-
-        /* Gun pose: index + middle out, ring + pinky curled */
-        const isGun = (mLen > iLen*0.80) &&
-                      (rLen < iLen*0.75) &&
-                      (pLen < iLen*0.75);
-
-        if (isGun) {
-          this.laserPivot.setAttribute('visible', true);
-          this.laserPivot.object3D.position.copy(this._idxTip);
-          this._look.copy(this._idxTip).add(this._aim);
-          this.laserPivot.object3D.lookAt(this._look);
-          /* Rainbow hand pulse while in gun pose */
-          if (this.handMesh) {
-            const hue = (time % 2000) / 2000;
-            this.handMesh.material.color.setHSL(hue, 1.0, 0.5);
-            this.handMesh.material.emissive.setHSL(hue, 1.0, 0.28);
-          }
-        } else {
-          this.laserPivot.setAttribute('visible', false);
-          if (this.handMesh && this.defColor) {
-            this.handMesh.material.color.copy(this.defColor);
-            this.handMesh.material.emissive.setHex(0x000000);
-          }
-        }
-
-        if (this.cooldown) return;
-
-        /* Hammer: thumb drops toward index knuckle */
-        if (isGun && this._thumb.distanceTo(this._idxBase) < 0.055) {
-          this._fire(this._idxTip, this._aim);
-        }
-      },
-
-      _fire(origin, dir) {
-        this.cooldown = true;
-        this.sys.audio.shoot();
-
-        /* Barrel flash */
-        this.barrel.setAttribute('material', 'color: #ffffff; wireframe: false; emissive: #88ffff');
-        this.muzzle.setAttribute('visible', 'true');
-
-        /* ── Tracer streak ───────────────────────────────────── */
-        const tLen = 3.0;
-        const tracer = document.createElement('a-entity');
-        tracer.setAttribute('geometry', `primitive: cylinder; radius: 0.005; height: ${tLen}`);
-        tracer.setAttribute('material', 'color: #00ffcc; shader: flat; transparent: true; opacity: 0.65');
-        this._tMid.copy(origin).addScaledVector(dir, tLen * 0.5);
-        tracer.setAttribute('position',
-          `${this._tMid.x} ${this._tMid.y} ${this._tMid.z}`);
-        this.el.sceneEl.appendChild(tracer);
-        /* Orient tracer along aim direction */
-        this._tQuat.setFromUnitVectors(this._tUp, dir);
-        tracer.object3D.quaternion.copy(this._tQuat);
-        tracer.setAttribute('animation',
-          'property: material.opacity; to: 0; dur: 190; easing: easeOutQuad');
-        setTimeout(() => tracer.parentNode && tracer.parentNode.removeChild(tracer), 220);
-
-        /* ── Plasma bolt ─────────────────────────────────────── */
-        const bolt = document.createElement('a-entity');
-        bolt.setAttribute('geometry', 'primitive: sphere; radius: 0.07');
-        bolt.setAttribute('material', 'color: #00ffcc; shader: flat; emissive: #00ffcc');
-        bolt.setAttribute('position', `${origin.x} ${origin.y} ${origin.z}`);
-        bolt.object3D.scale.set(1, 1, 3.2);
-        this._look.copy(origin).add(dir);
-        bolt.object3D.lookAt(this._look);
-        bolt.setAttribute('projectile-behavior',
-          `direction: ${dir.x} ${dir.y} ${dir.z}; speed: 16`);
-        this.el.sceneEl.appendChild(bolt);
-
-        /* ── Haptic pulse ────────────────────────────────────── */
-        try {
-          const xrs = this.el.sceneEl.xrSession;
-          if (xrs) for (const src of xrs.inputSources) {
-            src.gamepad?.hapticActuators?.[0]?.pulse(0.45, 55);
-          }
-        } catch(e) {}
-
-        /* Reset barrel */
-        setTimeout(() => {
-          this.barrel.setAttribute('material',
-            'color: #0088ff; wireframe: true; emissive: #003366');
-          this.muzzle.setAttribute('visible', 'false');
-          this.cooldown = false;
-        }, 280);
-      }
-    });
-  </script>
+    </script>
 </head>
 <body>
-  <a-scene webxr="optionalFeatures: hand-tracking;"
-           floating-level rift-manager game-manager>
+    <div id="info">Echo Weaver: Phase 1<br/>Hand Tracking Sandbox. Requires WebXR capable headset.</div>
 
-    <!-- ── Dimensional rift plane ─────────────────────────── -->
-    <a-entity id="dimensional-rift"
-              geometry="primitive: plane; width: 1; height: 1"
-              material="shader: rift-void; transparent: true; side: double; depthWrite: false"
-              visible="false">
-    </a-entity>
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
 
-    <!-- ── Player rig ─────────────────────────────────────── -->
-    <a-entity id="rig" position="0 3.5 0">
+        // --- System Globals ---
+        let camera, scene, renderer;
+        let heartStone;
+        let orbs = [];
+        const hands = [null, null]; // Left, Right
+        
+        // Settings based on GDD
+        const EMA_ALPHA = 0.4; // 0.0 to 1.0. Lower is smoother but laggier.
+        const CATCH_RADIUS = 0.15; // Meters
 
-      <a-camera position="0 1.6 0">
+        // Track smoothed positions to prevent jitter
+        const smoothedJoints = new Map();
 
-        <!-- Score — top center -->
-        <a-text id="score-display"
-                value="SCORE  0000000"
-                position="0 0.36 -1.15"
-                align="center"
-                width="2.6"
-                color="#00ffcc"
-                font="mozillavr">
-        </a-text>
+        init();
+        renderer.setAnimationLoop(animate);
 
-        <!-- Wave — top left -->
-        <a-text id="wave-display"
-                value="WAVE  1"
-                position="-0.52 0.36 -1.15"
-                align="left"
-                width="1.8"
-                color="#8899ff"
-                font="mozillavr">
-        </a-text>
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a12);
+            scene.fog = new THREE.Fog(0x0a0a12, 2, 10);
 
-        <!-- Health — top right -->
-        <a-text id="health-display"
-                value="♥♥♥"
-                position="0.52 0.36 -1.15"
-                align="right"
-                width="1.8"
-                color="#ff3366"
-                font="mozillavr">
-        </a-text>
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 1.6, 3); // Average standing height
 
-        <!-- Combo flash — center, hidden when no combo -->
-        <a-text id="combo-display"
-                value=""
-                position="0 0.06 -1.15"
-                align="center"
-                width="2.2"
-                color="#ffdd00"
-                visible="false"
-                font="mozillavr">
-        </a-text>
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
 
-        <!-- Minimal crosshair ring -->
-        <a-entity
-          geometry="primitive: ring; radiusInner: 0.0028; radiusOuter: 0.0048; segmentsTheta: 20"
-          material="color: #ffffff; shader: flat; transparent: true; opacity: 0.55"
-          position="0 0 -1.15">
-        </a-entity>
-        <!-- Crosshair dot -->
-        <a-entity
-          geometry="primitive: circle; radius: 0.001; segments: 8"
-          material="color: #00ffcc; shader: flat"
-          position="0 0 -1.14">
-        </a-entity>
+            // --- Environment Setup ---
+            const grid = new THREE.GridHelper(20, 40, 0x222244, 0x111122);
+            scene.add(grid);
 
-        <!-- Full-screen damage flash -->
-        <a-plane id="damage-overlay"
-                 position="0 0 -0.48"
-                 width="5" height="5"
-                 material="color: #ff0000; transparent: true; opacity: 0; shader: flat"
-                 depth-test="false">
-        </a-plane>
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+            scene.add(ambientLight);
 
-        <!-- Game state overlay  (wave clear / game over) -->
-        <a-entity id="game-overlay" visible="false">
-          <!-- Background panel -->
-          <a-plane position="0 0.04 -1.05"
-                   width="2.4" height="0.9"
-                   material="color: #050a18; transparent: true; opacity: 0.82; shader: flat">
-          </a-plane>
-          <!-- Border glow strip (top) -->
-          <a-plane position="0 0.495 -1.04"
-                   width="2.4" height="0.018"
-                   material="color: #00ffcc; shader: flat">
-          </a-plane>
-          <!-- Border glow strip (bottom) -->
-          <a-plane position="0 -0.415 -1.04"
-                   width="2.4" height="0.018"
-                   material="color: #00ffcc; shader: flat">
-          </a-plane>
-          <!-- Message -->
-          <a-text id="overlay-text"
-                  value=""
-                  position="0 0.05 -1.02"
-                  align="center"
-                  baseline="center"
-                  width="2.2"
-                  color="#00ffcc"
-                  font="mozillavr">
-          </a-text>
-        </a-entity>
+            const pointLight = new THREE.PointLight(0x00ffff, 2, 10);
+            pointLight.position.set(0, 1.2, 0);
+            scene.add(pointLight);
 
-      </a-camera>
+            // --- Heart Stone ---
+            const stoneGeo = new THREE.IcosahedronGeometry(0.3, 1);
+            const stoneMat = new THREE.MeshStandardMaterial({
+                color: 0x00ffff,
+                emissive: 0x008888,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.8
+            });
+            heartStone = new THREE.Mesh(stoneGeo, stoneMat);
+            heartStone.position.set(0, 1.2, -0.5);
+            scene.add(heartStone);
 
-      <!-- Both hands armed -->
-      <a-entity id="leftHand"
-                hand-tracking-controls="hand: left;"
-                hand-cannon>
-      </a-entity>
-      <a-entity id="rightHand"
-                hand-tracking-controls="hand: right;"
-                hand-cannon>
-      </a-entity>
+            // --- Test Orbs ---
+            createOrb(new THREE.Vector3(-0.5, 1.2, -0.2), 0xff0055); // Left Orb
+            createOrb(new THREE.Vector3(0.5, 1.2, -0.2), 0xaa00ff);  // Right Orb
 
-    </a-entity>
-  </a-scene>
+            // --- WebXR Hands Setup ---
+            setupHand(0); // Left
+            setupHand(1); // Right
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createOrb(position, colorHex) {
+            const geo = new THREE.SphereGeometry(0.08, 16, 16);
+            const mat = new THREE.MeshStandardMaterial({
+                color: colorHex,
+                emissive: colorHex,
+                emissiveIntensity: 0.5,
+                roughness: 0.2,
+                metalness: 0.8
+            });
+            const orb = new THREE.Mesh(geo, mat);
+            orb.position.copy(position);
+            
+            // Custom properties for game logic
+            orb.userData = {
+                baseY: position.y,
+                phase: Math.random() * Math.PI * 2,
+                heldBy: null // null or 'left'/'right'
+            };
+            
+            scene.add(orb);
+            orbs.push(orb);
+        }
+
+        function setupHand(index) {
+            const hand = renderer.xr.getHand(index);
+            scene.add(hand);
+
+            // Custom joint rendering (Ghost Hands)
+            const jointGeo = new THREE.SphereGeometry(0.015, 8, 8);
+            const jointMat = new THREE.MeshBasicMaterial({
+                color: 0x00ffcc,
+                transparent: true,
+                opacity: 0.4,
+                blending: THREE.AdditiveBlending
+            });
+
+            // Standard WebXR joint names we care about
+            const keyJoints = [
+                'wrist', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip', 'ring-finger-tip', 'pinky-finger-tip'
+            ];
+
+            hand.userData.jointMeshes = {};
+            hand.userData.isHolding = false;
+            hand.userData.handedness = index === 0 ? 'left' : 'right';
+
+            // We will dynamically create meshes for joints as they appear in the XR tracking data
+            hand.addEventListener('connected', (event) => {
+                hand.userData.xrInputSource = event.data;
+            });
+
+            hands[index] = hand;
+        }
+
+        function applyEMA(jointName, currentPos, frameTime) {
+            // Apply Exponential Moving Average filter
+            if (!smoothedJoints.has(jointName)) {
+                smoothedJoints.set(jointName, currentPos.clone());
+                return currentPos.clone();
+            }
+
+            const previousPos = smoothedJoints.get(jointName);
+            const smoothed = new THREE.Vector3();
+            
+            // Formula from GDD: smoothed_pos = (raw_pos * alpha) + (smoothed_pos * (1 - alpha))
+            smoothed.x = (currentPos.x * EMA_ALPHA) + (previousPos.x * (1 - EMA_ALPHA));
+            smoothed.y = (currentPos.y * EMA_ALPHA) + (previousPos.y * (1 - EMA_ALPHA));
+            smoothed.z = (currentPos.z * EMA_ALPHA) + (previousPos.z * (1 - EMA_ALPHA));
+
+            smoothedJoints.set(jointName, smoothed);
+            return smoothed;
+        }
+
+        function isHandOpen(hand) {
+            // GDD approximation: Distance from wrist to index tip.
+            // If clenched, distance is small. If open, distance is large (~0.15m for adult).
+            if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
+
+            const wrist = hand.joints['wrist'];
+            const indexTip = hand.joints['index-finger-tip'];
+            
+            if (!wrist.position || !indexTip.position) return false;
+
+            const dist = wrist.position.distanceTo(indexTip.position);
+            return dist > 0.10; // 10cm threshold for "open"
+        }
+
+        function updateHands() {
+            hands.forEach(hand => {
+                if (!hand || !hand.joints) return;
+
+                const wristSpace = hand.joints['wrist'];
+                if (!wristSpace || !wristSpace.position) return; // Tracking lost
+
+                // Render visual ghost joints
+                Object.keys(hand.joints).forEach(jointName => {
+                    const joint = hand.joints[jointName];
+                    if (!joint.position) return;
+
+                    // Create mesh if it doesn't exist
+                    if (!hand.userData.jointMeshes[jointName]) {
+                        const geo = new THREE.SphereGeometry(jointName.includes('tip') ? 0.012 : 0.008, 8, 8);
+                        const mat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.3 });
+                        const mesh = new THREE.Mesh(geo, mat);
+                        scene.add(mesh);
+                        hand.userData.jointMeshes[jointName] = mesh;
+                    }
+
+                    const mesh = hand.userData.jointMeshes[jointName];
+                    
+                    // Apply EMA smoothing to visual representation
+                    const uniqueJointId = `${hand.userData.handedness}_${jointName}`;
+                    const smoothedPos = applyEMA(uniqueJointId, joint.position);
+                    
+                    mesh.position.copy(smoothedPos);
+                    mesh.quaternion.copy(joint.quaternion);
+                });
+
+                // --- Catch Logic ---
+                const isOp = isHandOpen(hand);
+                const wristPos = hand.joints['wrist'].position;
+
+                // Release logic: If holding but hand is closed (flick/drop)
+                if (hand.userData.isHolding && !isOp) {
+                    orbs.forEach(orb => {
+                        if (orb.userData.heldBy === hand.userData.handedness) {
+                            orb.userData.heldBy = null; // Drop it
+                            orb.userData.baseY = orb.position.y; // Reset hover base
+                        }
+                    });
+                    hand.userData.isHolding = false;
+                }
+
+                // Grab logic: If empty and hand is open
+                if (!hand.userData.isHolding && isOp) {
+                    for (let i = 0; i < orbs.length; i++) {
+                        const orb = orbs[i];
+                        if (orb.userData.heldBy !== null) continue; // Already held by other hand
+
+                        const dist = wristPos.distanceTo(orb.position);
+                        if (dist < CATCH_RADIUS) {
+                            // Caught!
+                            orb.userData.heldBy = hand.userData.handedness;
+                            hand.userData.isHolding = true;
+                            // Reset overload timer here eventually
+                            break; 
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateOrbs(time) {
+            orbs.forEach(orb => {
+                if (orb.userData.heldBy) {
+                    // Update position to follow the hand holding it
+                    const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
+                    const hand = hands[handIndex];
+                    if (hand && hand.joints && hand.joints['wrist']) {
+                        const wristPos = hand.joints['wrist'].position;
+                        // Lerp smoothly to the palm center instead of snapping instantly
+                        orb.position.lerp(wristPos, 0.2); 
+                    }
+                } else {
+                    // Idle bobbing animation
+                    orb.position.y = orb.userData.baseY + Math.sin(time * 2 + orb.userData.phase) * 0.05;
+                }
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate(time, frame) {
+            const timeSeconds = time * 0.001;
+            
+            heartStone.rotation.y += 0.01;
+            heartStone.rotation.x += 0.005;
+
+            if (renderer.xr.isPresenting) {
+                updateHands();
+            }
+
+            updateOrbs(timeSeconds);
+
+            renderer.render(scene, camera);
+        }
+    </script>
 </body>
 </html>
