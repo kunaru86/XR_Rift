@@ -2,15 +2,17 @@
 <html>
   <head>
     <title>Quantum Resonance: Spatial Rift Shader</title>
+    <!-- Stick to 1.7.0, it has the most stable hand-tracking API -->
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
     
     <script>
-      // 1. THE SPATIAL TEAR SHADER (Brutalist Void)
+      // 1. THE SPATIAL TEAR SHADER
       AFRAME.registerShader('rift-void', {
         schema: {
           timeMsec: {type: 'time', is: 'uniform'},
           colorEdge: {type: 'color', is: 'uniform', default: '#00ffcc'}, 
-          colorVoid: {type: 'color', is: 'uniform', default: '#050505'}  
+          // Changed from black to radioactive purple so you can actually see it in VR mode
+          colorVoid: {type: 'color', is: 'uniform', default: '#1a0044'}  
         },
 
         vertexShader: `
@@ -65,7 +67,7 @@
         `
       });
 
-      // 2. THE SPATIAL TEAR MANAGER (Now with actual global coordinate math)
+      // 2. THE SPATIAL TEAR MANAGER
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
@@ -76,7 +78,6 @@
           const leftHand = document.querySelector('#leftHand');
           const rightHand = document.querySelector('#rightHand');
 
-          // We use basic tracking flags. 
           leftHand.addEventListener('pinchstarted', () => { this.leftPinching = true; console.log("Left pinch locked."); });
           leftHand.addEventListener('pinchended', () => { this.leftPinching = false; this.collapseRift(); });
 
@@ -89,31 +90,25 @@
             const leftEl = document.querySelector('#leftHand');
             const rightEl = document.querySelector('#rightHand');
             
-            // Extract global world coordinates. Never trust local tracking vectors.
             const leftPos = new THREE.Vector3();
             const rightPos = new THREE.Vector3();
             leftEl.object3D.getWorldPosition(leftPos);
             rightEl.object3D.getWorldPosition(rightPos);
             
-            // Calculate absolute distance
             const distance = leftPos.distanceTo(rightPos);
             
-            // Generate immediate visual feedback even at small distances
-            const tearScale = Math.max(0.2, (distance - 0.05) * 4); 
+            // Removed the deadzone. The rift now scales immediately with distance. multiplier increased to 5.
+            const tearScale = distance * 5; 
             
-            // Calculate exact midpoint
             const midPoint = new THREE.Vector3().addVectors(leftPos, rightPos).multiplyScalar(0.5);
             
-            // Apply position and scale
             this.rift.object3D.position.copy(midPoint);
             this.rift.object3D.scale.set(tearScale, tearScale, 1); 
             
-            // Force the 2D plane to stare directly at the user so it doesn't vanish edge-on
             const camPos = new THREE.Vector3();
             this.camera.object3D.getWorldPosition(camPos);
             this.rift.object3D.lookAt(camPos);
             
-            // Ensure visibility
             this.rift.setAttribute('material', 'transparent: true; opacity: 1');
           }
         },
@@ -121,7 +116,6 @@
         collapseRift: function() {
           this.rift.object3D.scale.set(0, 0, 0);
           this.rift.setAttribute('material', 'opacity: 0');
-          console.log("Rift closed. Reality stabilized.");
         }
       });
 
@@ -156,8 +150,9 @@
     </script>
   </head>
   <body>
-    <!-- AR Passthrough strictly requires a transparent background. Click the AR button, not VR. -->
-    <a-scene webxr="optionalFeatures: hand-tracking, hit-test; referenceSpaceType: local-floor;" background="transparent: true" rift-manager>
+    <!-- Fallback background added. In VR, it's grey. In AR, transparent overrides it. -->
+    <!-- Simplified WebXR request to prevent AR button from failing on strict headsets -->
+    <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #444444; transparent: true" rift-manager>
       
       <!-- Dimensional Rift Plane -->
       <a-entity id="dimensional-rift" 
