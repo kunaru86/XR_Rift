@@ -9,8 +9,8 @@
       AFRAME.registerShader('rift-void', {
         schema: {
           timeMsec: {type: 'time', is: 'uniform'},
-          colorEdge: {type: 'color', is: 'uniform', default: '#00ffcc'}, // Brutalist Cyan
-          colorVoid: {type: 'color', is: 'uniform', default: '#050505'}  // Deep Space
+          colorEdge: {type: 'color', is: 'uniform', default: '#00ffcc'}, 
+          colorVoid: {type: 'color', is: 'uniform', default: '#050505'}  
         },
 
         vertexShader: `
@@ -27,12 +27,10 @@
           uniform vec3 colorVoid;
           varying vec2 vUv;
 
-          // Pseudo-random noise function
           float random(vec2 st) {
               return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
           }
 
-          // 2D Noise based on Morgan McGuire's approach
           float noise(vec2 st) {
               vec2 i = floor(st);
               vec2 f = fract(st);
@@ -45,99 +43,89 @@
           }
 
           void main() {
-            float time = timeMsec / 1000.0; // Convert to seconds
+            float time = timeMsec / 1000.0; 
             
-            // Center UV coordinates to -1.0 to 1.0
             vec2 p = vUv * 2.0 - 1.0;
-            
-            // Convert to polar coordinates for circular math
             float r = length(p); 
             float a = atan(p.y, p.x); 
 
-            // Create a swirling vortex effect
             float swirl = a + time * 3.0 - r * 4.0;
-            
-            // Distort the radius using moving noise to create jagged edges
             float n = noise(vec2(cos(swirl), sin(swirl)) * 2.5 + time * 1.5);
             float distortedRadius = r + n * 0.3;
 
-            // Masking: 
-            // Inside the tear (< 0.6) = solid void.
-            // Edge (0.6 to 0.8) = glowing boundary.
-            // Outside (> 0.8) = perfectly transparent (shows your real room).
+            // Masking out the physical room
             float alphaMask = 1.0 - smoothstep(0.7, 0.9, distortedRadius);
-            
-            // Calculate the intensity of the glowing edge
             float glowMask = smoothstep(0.5, 0.8, distortedRadius) * smoothstep(1.0, 0.8, distortedRadius);
 
-            // Mix the void color with the edge color based on the glow mask
             vec3 finalColor = mix(colorVoid, colorEdge, glowMask * 2.5);
-            
-            // Add high-frequency flicker to the edge for unstable energy feel
             finalColor += colorEdge * noise(vec2(time * 20.0, a * 10.0)) * glowMask * 0.5;
 
-            // Output final pixel
             gl_FragColor = vec4(finalColor, alphaMask);
           }
         `
       });
 
-      // 2. THE SPATIAL TEAR MANAGER
+      // 2. THE SPATIAL TEAR MANAGER (Now with actual global coordinate math)
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
           this.rightPinching = false;
           this.rift = document.querySelector('#dimensional-rift');
+          this.camera = document.querySelector('a-camera');
           
           const leftHand = document.querySelector('#leftHand');
           const rightHand = document.querySelector('#rightHand');
 
-          leftHand.addEventListener('pinchstarted', () => this.leftPinching = true);
-          leftHand.addEventListener('pinchended', () => {
-            this.leftPinching = false;
-            this.collapseRift();
-          });
+          // We use basic tracking flags. 
+          leftHand.addEventListener('pinchstarted', () => { this.leftPinching = true; console.log("Left pinch locked."); });
+          leftHand.addEventListener('pinchended', () => { this.leftPinching = false; this.collapseRift(); });
 
-          rightHand.addEventListener('pinchstarted', () => this.rightPinching = true);
-          rightHand.addEventListener('pinchended', () => {
-            this.rightPinching = false;
-            this.collapseRift();
-          });
+          rightHand.addEventListener('pinchstarted', () => { this.rightPinching = true; console.log("Right pinch locked."); });
+          rightHand.addEventListener('pinchended', () => { this.rightPinching = false; this.collapseRift(); });
         },
         
         tick: function () {
           if (this.leftPinching && this.rightPinching) {
-            const leftPos = document.querySelector('#leftHand').object3D.position;
-            const rightPos = document.querySelector('#rightHand').object3D.position;
+            const leftEl = document.querySelector('#leftHand');
+            const rightEl = document.querySelector('#rightHand');
             
-            const dx = leftPos.x - rightPos.x;
-            const dy = leftPos.y - rightPos.y;
-            const dz = leftPos.z - rightPos.z;
-            const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            // Extract global world coordinates. Never trust local tracking vectors.
+            const leftPos = new THREE.Vector3();
+            const rightPos = new THREE.Vector3();
+            leftEl.object3D.getWorldPosition(leftPos);
+            rightEl.object3D.getWorldPosition(rightPos);
             
-            // Deadzone of 0.1m, multiplier of 4 for dramatic scale
-            const tearScale = Math.max(0, (distance - 0.1) * 4); 
+            // Calculate absolute distance
+            const distance = leftPos.distanceTo(rightPos);
             
-            const midX = (leftPos.x + rightPos.x) / 2;
-            const midY = (leftPos.y + rightPos.y) / 2;
-            const midZ = (leftPos.z + rightPos.z) / 2;
+            // Generate immediate visual feedback even at small distances
+            const tearScale = Math.max(0.2, (distance - 0.05) * 4); 
             
-            this.rift.setAttribute('position', `${midX} ${midY} ${midZ}`);
-            this.rift.setAttribute('scale', `${tearScale} ${tearScale} 0.1`);
+            // Calculate exact midpoint
+            const midPoint = new THREE.Vector3().addVectors(leftPos, rightPos).multiplyScalar(0.5);
             
-            // Ensure the material is visible when tearing
+            // Apply position and scale
+            this.rift.object3D.position.copy(midPoint);
+            this.rift.object3D.scale.set(tearScale, tearScale, 1); 
+            
+            // Force the 2D plane to stare directly at the user so it doesn't vanish edge-on
+            const camPos = new THREE.Vector3();
+            this.camera.object3D.getWorldPosition(camPos);
+            this.rift.object3D.lookAt(camPos);
+            
+            // Ensure visibility
             this.rift.setAttribute('material', 'transparent: true; opacity: 1');
           }
         },
 
         collapseRift: function() {
-          this.rift.setAttribute('scale', '0 0 0');
+          this.rift.object3D.scale.set(0, 0, 0);
           this.rift.setAttribute('material', 'opacity: 0');
           console.log("Rift closed. Reality stabilized.");
         }
       });
 
-      // 3. THE KINETIC RECOIL CANNON (Keeping it locked and loaded)
+      // 3. THE KINETIC RECOIL CANNON
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.previousPosition = new THREE.Vector3();
@@ -147,10 +135,11 @@
         tick: function (time, timeDelta) {
           if (this.cooldown || timeDelta === 0) return;
 
-          const currentPosition = this.el.object3D.position;
+          const currentPosition = new THREE.Vector3();
+          this.el.object3D.getWorldPosition(currentPosition);
+
           const velocityY = (currentPosition.y - this.previousPosition.y) / timeDelta;
           
-          // Adjusted threshold slightly for realistic physical jerks
           if (velocityY > 0.006) { 
             this.fireCannon();
           }
@@ -161,18 +150,16 @@
         fireCannon: function() {
           console.log("BOOM. Kinetic payload delivered.");
           this.cooldown = true;
-          // You will add projectile spawning here later
           setTimeout(() => { this.cooldown = false; }, 400);
         }
       });
     </script>
   </head>
   <body>
-    <!-- Background must be transparent to allow the passthrough cameras to feed through -->
-    <a-scene webxr="optionalFeatures: hand-tracking; requiredFeatures: local-floor;" background="transparent: true" rift-manager>
+    <!-- AR Passthrough strictly requires a transparent background. Click the AR button, not VR. -->
+    <a-scene webxr="optionalFeatures: hand-tracking, hit-test; referenceSpaceType: local-floor;" background="transparent: true" rift-manager>
       
-      <!-- The Dimensional Rift using our custom shader -->
-      <!-- We use a flat plane instead of a cylinder so the 2D UV mapping looks correct -->
+      <!-- Dimensional Rift Plane -->
       <a-entity id="dimensional-rift" 
                 geometry="primitive: plane; width: 1; height: 1" 
                 material="shader: rift-void; transparent: true; side: double; depthWrite: false" 
@@ -182,7 +169,6 @@
       <!-- Player Rig -->
       <a-entity id="rig" position="0 0 0">
         <a-camera position="0 1.6 0"></a-camera>
-        
         <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
         <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon></a-entity>
       </a-entity>
