@@ -1,11 +1,88 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Quantum Resonance: Core Loop</title>
+    <title>Quantum Resonance: Spatial Rift Shader</title>
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
     
     <script>
-      // 1. THE SPATIAL TEAR MANAGER
+      // 1. THE SPATIAL TEAR SHADER (Brutalist Void)
+      AFRAME.registerShader('rift-void', {
+        schema: {
+          timeMsec: {type: 'time', is: 'uniform'},
+          colorEdge: {type: 'color', is: 'uniform', default: '#00ffcc'}, // Brutalist Cyan
+          colorVoid: {type: 'color', is: 'uniform', default: '#050505'}  // Deep Space
+        },
+
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+
+        fragmentShader: `
+          uniform float timeMsec;
+          uniform vec3 colorEdge;
+          uniform vec3 colorVoid;
+          varying vec2 vUv;
+
+          // Pseudo-random noise function
+          float random(vec2 st) {
+              return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+          }
+
+          // 2D Noise based on Morgan McGuire's approach
+          float noise(vec2 st) {
+              vec2 i = floor(st);
+              vec2 f = fract(st);
+              float a = random(i);
+              float b = random(i + vec2(1.0, 0.0));
+              float c = random(i + vec2(0.0, 1.0));
+              float d = random(i + vec2(1.0, 1.0));
+              vec2 u = f * f * (3.0 - 2.0 * f);
+              return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+          }
+
+          void main() {
+            float time = timeMsec / 1000.0; // Convert to seconds
+            
+            // Center UV coordinates to -1.0 to 1.0
+            vec2 p = vUv * 2.0 - 1.0;
+            
+            // Convert to polar coordinates for circular math
+            float r = length(p); 
+            float a = atan(p.y, p.x); 
+
+            // Create a swirling vortex effect
+            float swirl = a + time * 3.0 - r * 4.0;
+            
+            // Distort the radius using moving noise to create jagged edges
+            float n = noise(vec2(cos(swirl), sin(swirl)) * 2.5 + time * 1.5);
+            float distortedRadius = r + n * 0.3;
+
+            // Masking: 
+            // Inside the tear (< 0.6) = solid void.
+            // Edge (0.6 to 0.8) = glowing boundary.
+            // Outside (> 0.8) = perfectly transparent (shows your real room).
+            float alphaMask = 1.0 - smoothstep(0.7, 0.9, distortedRadius);
+            
+            // Calculate the intensity of the glowing edge
+            float glowMask = smoothstep(0.5, 0.8, distortedRadius) * smoothstep(1.0, 0.8, distortedRadius);
+
+            // Mix the void color with the edge color based on the glow mask
+            vec3 finalColor = mix(colorVoid, colorEdge, glowMask * 2.5);
+            
+            // Add high-frequency flicker to the edge for unstable energy feel
+            finalColor += colorEdge * noise(vec2(time * 20.0, a * 10.0)) * glowMask * 0.5;
+
+            // Output final pixel
+            gl_FragColor = vec4(finalColor, alphaMask);
+          }
+        `
+      });
+
+      // 2. THE SPATIAL TEAR MANAGER
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
@@ -15,14 +92,12 @@
           const leftHand = document.querySelector('#leftHand');
           const rightHand = document.querySelector('#rightHand');
 
-          // Listeners for Left Hand
           leftHand.addEventListener('pinchstarted', () => this.leftPinching = true);
           leftHand.addEventListener('pinchended', () => {
             this.leftPinching = false;
             this.collapseRift();
           });
 
-          // Listeners for Right Hand
           rightHand.addEventListener('pinchstarted', () => this.rightPinching = true);
           rightHand.addEventListener('pinchended', () => {
             this.rightPinching = false;
@@ -31,41 +106,38 @@
         },
         
         tick: function () {
-          // Only execute the tear math if both hands are locked in a pinch
           if (this.leftPinching && this.rightPinching) {
             const leftPos = document.querySelector('#leftHand').object3D.position;
             const rightPos = document.querySelector('#rightHand').object3D.position;
             
-            // Calculate the 3D distance between the two hands
             const dx = leftPos.x - rightPos.x;
             const dy = leftPos.y - rightPos.y;
             const dz = leftPos.z - rightPos.z;
             const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
             
-            // Map the physical distance to the scale of the rift
-            // Subtracting a deadzone (e.g., 0.1 meters) so it doesn't open immediately
-            const tearScale = Math.max(0, (distance - 0.1) * 3); 
+            // Deadzone of 0.1m, multiplier of 4 for dramatic scale
+            const tearScale = Math.max(0, (distance - 0.1) * 4); 
             
-            // Position the rift exactly halfway between the two hands
             const midX = (leftPos.x + rightPos.x) / 2;
             const midY = (leftPos.y + rightPos.y) / 2;
             const midZ = (leftPos.z + rightPos.z) / 2;
             
             this.rift.setAttribute('position', `${midX} ${midY} ${midZ}`);
             this.rift.setAttribute('scale', `${tearScale} ${tearScale} 0.1`);
-            this.rift.setAttribute('material', 'opacity: 1');
+            
+            // Ensure the material is visible when tearing
+            this.rift.setAttribute('material', 'transparent: true; opacity: 1');
           }
         },
 
         collapseRift: function() {
-          // When a pinch is released, snap the rift shut
           this.rift.setAttribute('scale', '0 0 0');
           this.rift.setAttribute('material', 'opacity: 0');
-          console.log("Rift collapsed. Tracking lost or user released tension.");
+          console.log("Rift closed. Reality stabilized.");
         }
       });
 
-      // 2. THE KINETIC RECOIL CANNON
+      // 3. THE KINETIC RECOIL CANNON (Keeping it locked and loaded)
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.previousPosition = new THREE.Vector3();
@@ -76,46 +148,42 @@
           if (this.cooldown || timeDelta === 0) return;
 
           const currentPosition = this.el.object3D.position;
-          
-          // Calculate velocity on the Y axis (detecting a sharp upward jerk)
           const velocityY = (currentPosition.y - this.previousPosition.y) / timeDelta;
           
-          // If the upward velocity spikes past our threshold, fire the weapon
-          if (velocityY > 0.005) { 
-            this.fireCannon(currentPosition);
+          // Adjusted threshold slightly for realistic physical jerks
+          if (velocityY > 0.006) { 
+            this.fireCannon();
           }
           
           this.previousPosition.copy(currentPosition);
         },
 
-        fireCannon: function(pos) {
+        fireCannon: function() {
           console.log("BOOM. Kinetic payload delivered.");
           this.cooldown = true;
-          
-          // Game Logic: Spawn a projectile here using Three.js or A-Frame entities
-          // ...
-
-          // Reset the cooldown after 500ms so they can't spam the processor
-          setTimeout(() => { this.cooldown = false; }, 500);
+          // You will add projectile spawning here later
+          setTimeout(() => { this.cooldown = false; }, 400);
         }
       });
     </script>
   </head>
   <body>
+    <!-- Background must be transparent to allow the passthrough cameras to feed through -->
     <a-scene webxr="optionalFeatures: hand-tracking; requiredFeatures: local-floor;" background="transparent: true" rift-manager>
       
+      <!-- The Dimensional Rift using our custom shader -->
+      <!-- We use a flat plane instead of a cylinder so the 2D UV mapping looks correct -->
       <a-entity id="dimensional-rift" 
-                geometry="primitive: cylinder; radius: 1; height: 0.1" 
-                rotation="90 0 0" 
-                material="color: #00ffcc; shader: flat; side: double; opacity: 0; transparent: true" 
+                geometry="primitive: plane; width: 1; height: 1" 
+                material="shader: rift-void; transparent: true; side: double; depthWrite: false" 
                 scale="0 0 0">
       </a-entity>
 
+      <!-- Player Rig -->
       <a-entity id="rig" position="0 0 0">
         <a-camera position="0 1.6 0"></a-camera>
         
         <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
-        
         <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon></a-entity>
       </a-entity>
 
