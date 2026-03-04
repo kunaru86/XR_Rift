@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo Weaver - Phase 2</title>
+    <title>Echo Weaver - Phase 3</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: monospace; }
         #info {
@@ -27,7 +27,7 @@
     </script>
 </head>
 <body>
-    <div id="info">Echo Weaver: Phase 2<br/>Catch an Orb, pinch your index and thumb together to draw, release to cast.</div>
+    <div id="info">Echo Weaver: Phase 3<br/>Defend the Heart Stone. Spells: Line (Beam), Triangle (Repulse).</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -35,14 +35,17 @@
 
         // --- System Globals ---
         let camera, scene, renderer;
-        let heartStone;
+        let heartStone, healthRing;
+        let heartHealth = 100;
         let orbs = [];
         const hands = [null, null]; // Left, Right
         
         // --- Settings ---
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
-        const PINCH_THRESH = 0.03; // Distance between thumb and index to trigger drawing
+        const PINCH_THRESH = 0.03;
+        const SPAWN_RATE = 2.5; // Seconds between orb spawns
+        let spawnTimer = 0;
 
         const smoothedJoints = new Map();
 
@@ -55,7 +58,7 @@
         let drawPoints3D = [];
         let activeCastingHand = null;
 
-        // --- $1 Recognizer Implementation (Compact) ---
+        // --- $1 Recognizer Implementation (Compact - Circle Purged) ---
         class Point { constructor(x, y) { this.x = x; this.y = y; } }
         class GestureRecognizer {
             constructor() {
@@ -112,7 +115,7 @@
                 }
                 let newpoints = [];
                 for (let i = 0; i < points.length; i++) {
-                    let qx = points[i].x * (size / Math.max(maxX - minX, 1.0)); // Prevent div by 0 for strict lines
+                    let qx = points[i].x * (size / Math.max(maxX - minX, 1.0)); 
                     let qy = points[i].y * (size / Math.max(maxY - minY, 1.0));
                     newpoints.push(new Point(qx, qy));
                 }
@@ -150,26 +153,11 @@
                 return points;
             }
             setupTemplates() {
-                // Generative templates
                 const addT = (name, pts) => this.Templates.push({Name: name, Points: this.Normalize(pts)});
                 
+                // User rejected circle. Scrapping. 
                 // Line
                 addT('line', [new Point(0,0), new Point(100,0)]);
-                
-                // Circle (Counter-Clockwise)
-                let circlePts = [];
-                for (let i = 0; i <= 36; i++) {
-                    circlePts.push(new Point(50 + 50 * Math.cos(i*Math.PI/18), 50 + 50 * Math.sin(i*Math.PI/18)));
-                }
-                addT('circle', circlePts);
-
-                // Circle (Clockwise)
-                let circlePtsCW = [];
-                for (let i = 0; i <= 36; i++) {
-                    circlePtsCW.push(new Point(50 + 50 * Math.cos((36-i)*Math.PI/18), 50 + 50 * Math.sin((36-i)*Math.PI/18)));
-                }
-                addT('circle', circlePtsCW);
-                
                 // Triangle
                 addT('triangle', [new Point(50,10), new Point(10,90), new Point(90,90), new Point(50,10)]);
             }
@@ -218,7 +206,7 @@
             pointLight.position.set(0, 1.2, 0);
             scene.add(pointLight);
 
-            // --- Heart Stone ---
+            // --- Heart Stone & Health UI ---
             const stoneGeo = new THREE.IcosahedronGeometry(0.3, 1);
             const stoneMat = new THREE.MeshStandardMaterial({
                 color: 0x00ffff, emissive: 0x008888, wireframe: true, transparent: true, opacity: 0.8
@@ -226,6 +214,12 @@
             heartStone = new THREE.Mesh(stoneGeo, stoneMat);
             heartStone.position.set(0, 1.2, -0.5);
             scene.add(heartStone);
+
+            const ringGeo = new THREE.TorusGeometry(0.45, 0.02, 8, 32);
+            const ringMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
+            healthRing = new THREE.Mesh(ringGeo, ringMat);
+            healthRing.rotation.x = Math.PI / 2;
+            heartStone.add(healthRing); // Child of Heart Stone
 
             // --- Trail Setup ---
             trailGeo = new THREE.BufferGeometry();
@@ -235,24 +229,57 @@
             trailLine = new THREE.Line(trailGeo, trailMat);
             scene.add(trailLine);
 
-            // --- Test Orbs ---
-            createOrb(new THREE.Vector3(-0.5, 1.2, -0.2), 0xff0055); // Left Orb
-            createOrb(new THREE.Vector3(0.5, 1.2, -0.2), 0xaa00ff);  // Right Orb
-
             setupHand(0); // Left
             setupHand(1); // Right
 
             window.addEventListener('resize', onWindowResize);
         }
 
-        function createOrb(position, colorHex) {
+        function damageHeartStone() {
+            heartHealth -= 20;
+            
+            // Flash red
+            heartStone.material.emissive.setHex(0xff0000);
+            setTimeout(() => { heartStone.material.emissive.setHex(0x008888); }, 200);
+
+            // Update Ring
+            const scale = Math.max(0.1, heartHealth / 100);
+            healthRing.scale.set(scale, scale, scale);
+
+            if (heartHealth > 50) healthRing.material.color.setHex(0x00ff00);
+            else if (heartHealth > 20) healthRing.material.color.setHex(0xffff00);
+            else healthRing.material.color.setHex(0xff0000);
+
+            if (heartHealth <= 0) {
+                // System reset
+                heartHealth = 100;
+                healthRing.scale.set(1, 1, 1);
+                healthRing.material.color.setHex(0x00ff00);
+                // Wipe all orbs
+                orbs.forEach(orb => scene.remove(orb));
+                orbs = [];
+            }
+        }
+
+        function createOrb(position) {
+            const colors = [0xff0055, 0xaa00ff, 0xff5500];
+            const colorHex = colors[Math.floor(Math.random() * colors.length)];
+            
             const geo = new THREE.SphereGeometry(0.08, 16, 16);
             const mat = new THREE.MeshStandardMaterial({
                 color: colorHex, emissive: colorHex, emissiveIntensity: 0.5, roughness: 0.2, metalness: 0.8
             });
             const orb = new THREE.Mesh(geo, mat);
             orb.position.copy(position);
-            orb.userData = { baseY: position.y, phase: Math.random() * Math.PI * 2, heldBy: null };
+            
+            orb.userData = { 
+                baseY: position.y, 
+                phase: Math.random() * Math.PI * 2, 
+                heldBy: null,
+                state: 'homing', // 'homing', 'held', 'repulsed'
+                velocity: new THREE.Vector3()
+            };
+            
             scene.add(orb);
             orbs.push(orb);
         }
@@ -260,10 +287,6 @@
         function setupHand(index) {
             const hand = renderer.xr.getHand(index);
             scene.add(hand);
-
-            const jointMat = new THREE.MeshBasicMaterial({
-                color: 0x00ffcc, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending
-            });
 
             hand.userData.jointMeshes = {};
             hand.userData.isHolding = false;
@@ -281,8 +304,8 @@
             const previousPos = smoothedJoints.get(jointName);
             const smoothed = new THREE.Vector3(
                 (currentPos.x * EMA_ALPHA) + (previousPos.x * (1 - EMA_ALPHA)),
-                (currentPos.y * EMA_ALPHA) + (previousPos.y * (1 - EMA_ALPHA)),
-                (currentPos.z * EMA_ALPHA) + (previousPos.z * (1 - EMA_ALPHA))
+                (currentPos.y * EMA_ALPHA) + (currentPos.y * (1 - EMA_ALPHA)),
+                (currentPos.z * EMA_ALPHA) + (currentPos.z * (1 - EMA_ALPHA))
             );
             smoothedJoints.set(jointName, smoothed);
             return smoothed;
@@ -291,63 +314,87 @@
         function isHandOpen(hand) {
             if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
             const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist > 0.10; // Open hand threshold
+            return dist > 0.10; 
         }
 
         function isHandClosed(hand) {
             if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
             const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist < 0.07; // Tight fist threshold (Hysteresis prevents accidental drops)
+            return dist < 0.07; 
         }
 
         function isPinching(hand) {
             if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['index-finger-tip']) return false;
             const dist = hand.joints['thumb-tip'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist < PINCH_THRESH; // Pinch threshold
+            return dist < PINCH_THRESH; 
         }
 
         function fireSpell(type, origin) {
-            // Visual feedback for recognized spells
             if (type === 'line') {
-                const geo = new THREE.CylinderGeometry(0.02, 0.02, 2);
-                geo.translate(0, 1, 0); // Pivot at base
-                geo.rotateX(Math.PI / 2); // Point forward
+                // BEAM WEAPON: Raycast forward from camera direction
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+                
+                // Visual Effect
+                const geo = new THREE.CylinderGeometry(0.01, 0.01, 10);
+                geo.translate(0, 5, 0); 
+                geo.rotateX(Math.PI / 2); 
                 const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8});
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.copy(origin);
-                mesh.quaternion.copy(camera.quaternion); // Fire where looking
+                mesh.quaternion.copy(camera.quaternion); 
                 scene.add(mesh);
-                setTimeout(() => scene.remove(mesh), 500);
-            } else if (type === 'circle') {
-                const geo = new THREE.SphereGeometry(0.5, 16, 16);
-                const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.5});
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(origin);
-                scene.add(mesh);
-                setTimeout(() => scene.remove(mesh), 2000);
+                
+                // Collision Logic
+                const raycaster = new THREE.Raycaster(origin, forward);
+                const intersects = raycaster.intersectObjects(orbs);
+                
+                if (intersects.length > 0) {
+                    const hitOrb = intersects[0].object;
+                    const index = orbs.indexOf(hitOrb);
+                    if(index > -1) {
+                        // Boom. Vaporized.
+                        scene.remove(hitOrb);
+                        orbs.splice(index, 1);
+                    }
+                }
+
+                setTimeout(() => scene.remove(mesh), 200);
+
             } else if (type === 'triangle') {
-                const geo = new THREE.IcosahedronGeometry(0.1, 0);
-                const mat = new THREE.MeshBasicMaterial({color: 0xffaa00, wireframe: true});
+                // KINETIC REPULSE: Push all nearby non-held orbs away
+                const REPULSE_RADIUS = 3.0; // Meters
+                const PUSH_FORCE = 3.0;
+                
+                // Visual Effect
+                const geo = new THREE.IcosahedronGeometry(0.1, 1);
+                const mat = new THREE.MeshBasicMaterial({color: 0xffaa00, wireframe: true, transparent: true, opacity: 0.8});
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.copy(origin);
                 scene.add(mesh);
                 
-                // Animate expansion
                 const expInt = setInterval(() => {
-                    mesh.scale.multiplyScalar(1.2);
-                    mat.opacity -= 0.1;
+                    mesh.scale.multiplyScalar(1.3);
+                    mat.opacity -= 0.08;
                     if(mat.opacity <= 0) { clearInterval(expInt); scene.remove(mesh); }
-                }, 50);
+                }, 30);
+
+                // Collision Logic
+                orbs.forEach(orb => {
+                    if (orb.userData.state !== 'held' && orb.position.distanceTo(origin) < REPULSE_RADIUS) {
+                        orb.userData.state = 'repulsed';
+                        const pushDir = new THREE.Vector3().subVectors(orb.position, origin).normalize();
+                        // Give it severe outward velocity
+                        orb.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE)); 
+                    }
+                });
             }
         }
 
         function processGesture() {
             if (drawPoints3D.length < 10) return;
 
-            // Project 3D points to 2D Screen Space
             const points2D = drawPoints3D.map(pt3d => {
                 const vec = pt3d.clone().project(camera);
-                // Map from NDC (-1 to 1) to a pixel-like scale for the recognizer
                 return new Point((vec.x + 1) * 500, (1 - vec.y) * 500); 
             });
 
@@ -355,7 +402,6 @@
             console.log("Casted: ", result.Name, "Score: ", result.Score);
 
             if (result.Name !== 'none') {
-                // Find and destroy the held orb
                 const heldOrbIndex = orbs.findIndex(o => o.userData.heldBy === activeCastingHand);
                 if (heldOrbIndex > -1) {
                     const origin = orbs[heldOrbIndex].position.clone();
@@ -364,7 +410,6 @@
                     
                     fireSpell(result.Name, origin);
                     
-                    // Reset hand state
                     const handIdx = activeCastingHand === 'left' ? 0 : 1;
                     hands[handIdx].userData.isHolding = false;
                 }
@@ -378,7 +423,6 @@
                 const wristSpace = hand.joints['wrist'];
                 if (!wristSpace || !wristSpace.position) return; 
 
-                // Render ghosts and apply EMA
                 Object.keys(hand.joints).forEach(jointName => {
                     const joint = hand.joints[jointName];
                     if (!joint.position) return;
@@ -403,12 +447,11 @@
                 const pinching = isPinching(hand);
                 const wristPos = hand.joints['wrist'].position;
 
-                // Grab / Drop
                 if (hand.userData.isHolding && isClosed && !isDrawing) {
                     orbs.forEach(orb => {
                         if (orb.userData.heldBy === hand.userData.handedness) {
                             orb.userData.heldBy = null; 
-                            orb.userData.baseY = orb.position.y; 
+                            orb.userData.state = 'homing'; // Drops back to hostile state
                         }
                     });
                     hand.userData.isHolding = false;
@@ -417,19 +460,19 @@
                 if (!hand.userData.isHolding && isOp) {
                     for (let i = 0; i < orbs.length; i++) {
                         const orb = orbs[i];
-                        if (orb.userData.heldBy !== null) continue; 
+                        if (orb.userData.state === 'held') continue; 
+                        
                         if (wristPos.distanceTo(orb.position) < CATCH_RADIUS) {
                             orb.userData.heldBy = hand.userData.handedness;
+                            orb.userData.state = 'held';
                             hand.userData.isHolding = true;
                             break; 
                         }
                     }
                 }
 
-                // Spellcasting / Drawing Logic via Pinch
                 if (hand.userData.isHolding) {
                     if (pinching) {
-                        // Start / Continue drawing
                         if (!isDrawing) {
                             isDrawing = true;
                             currentTrailCount = 0;
@@ -438,7 +481,6 @@
                         }
                         
                         if (currentTrailCount < MAX_TRAIL_POINTS && activeCastingHand === hand.userData.handedness) {
-                            // Calculate midpoint between thumb and index for cleaner ink origin
                             const pinchPoint = new THREE.Vector3().addVectors(
                                 hand.joints['thumb-tip'].position, 
                                 hand.joints['index-finger-tip'].position
@@ -453,28 +495,65 @@
                             trailGeo.attributes.position.needsUpdate = true;
                         }
                     } else if (isDrawing && activeCastingHand === hand.userData.handedness) {
-                        // Released the pinch. Instantly cast.
                         isDrawing = false;
                         processGesture();
-                        trailGeo.setDrawRange(0, 0); // Clear trail visually
+                        trailGeo.setDrawRange(0, 0); 
                         currentTrailCount = 0;
                     }
                 }
             });
         }
 
-        function updateOrbs(time) {
-            orbs.forEach(orb => {
-                if (orb.userData.heldBy) {
+        function updateOrbs(timeDelta, timeSeconds) {
+            // Spawn logic
+            spawnTimer -= timeDelta;
+            if (spawnTimer <= 0) {
+                spawnTimer = SPAWN_RATE;
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 4; // Spawn 4 meters out
+                // Height varies slightly around Heart Stone height
+                const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
+                createOrb(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius));
+            }
+
+            const heartPos = heartStone.position;
+
+            for (let i = orbs.length - 1; i >= 0; i--) {
+                let orb = orbs[i];
+
+                if (orb.userData.state === 'held') {
                     const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
                     const hand = hands[handIndex];
                     if (hand && hand.joints && hand.joints['wrist']) {
                         orb.position.lerp(hand.joints['wrist'].position, 0.2); 
                     }
-                } else {
-                    orb.position.y = orb.userData.baseY + Math.sin(time * 2 + orb.userData.phase) * 0.05;
+                } else if (orb.userData.state === 'homing') {
+                    // Move relentlessly toward Heart Stone
+                    const moveDir = new THREE.Vector3().subVectors(heartPos, orb.position).normalize();
+                    const SPEED = 0.4; // Meters per second
+                    orb.position.add(moveDir.multiplyScalar(SPEED * timeDelta));
+                    
+                    // Add sine wave bobbing for organic feel
+                    orb.position.y += Math.sin(timeSeconds * 3 + orb.userData.phase) * 0.002;
+
+                    // Collision with Heart Stone
+                    if (orb.position.distanceTo(heartPos) < 0.35) {
+                        damageHeartStone();
+                        scene.remove(orb);
+                        orbs.splice(i, 1);
+                    }
+                } else if (orb.userData.state === 'repulsed') {
+                    // Apply physics velocity
+                    orb.position.add(orb.userData.velocity.clone().multiplyScalar(timeDelta));
+                    // Apply air friction
+                    orb.userData.velocity.multiplyScalar(0.92); 
+                    
+                    // If slowed down enough, regain homing behavior
+                    if (orb.userData.velocity.length() < 0.2) {
+                        orb.userData.state = 'homing';
+                    }
                 }
-            });
+            }
         }
 
         function onWindowResize() {
@@ -486,7 +565,7 @@
         let lastTime = 0;
         function animate(time, frame) {
             const timeSeconds = time * 0.001;
-            const timeDelta = timeSeconds - lastTime;
+            const timeDelta = Math.min(timeSeconds - lastTime, 0.1); // Cap delta to prevent huge jumps
             lastTime = timeSeconds;
             
             heartStone.rotation.y += 0.01;
@@ -496,7 +575,7 @@
                 updateHands(timeDelta);
             }
 
-            updateOrbs(timeSeconds);
+            updateOrbs(timeDelta, timeSeconds);
             renderer.render(scene, camera);
         }
     </script>
