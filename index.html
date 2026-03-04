@@ -91,6 +91,8 @@
           scene.add(this.stars);
 
           this.platformGroup = new THREE.Group();
+          window.shootableTargets = []; // Global array for fast collision lookups
+
           const platformsData = [
             [6, 6, 1.5, 0x4a90e2, 0, 2, 0], 
             [2.5, 2.5, 0.8, 0xe67e22, -5, 3.5, 4],
@@ -125,6 +127,19 @@
             group.add(cube);
             group.add(line);
             
+            // TARGET GENERATION: 70% chance to spawn a target on this platform
+            if (Math.random() > 0.3) {
+              const targetGeo = new THREE.OctahedronGeometry(0.3);
+              const targetMat = new THREE.MeshStandardMaterial({ color: 0xff0044, emissive: 0xaa0022, wireframe: true });
+              const target = new THREE.Mesh(targetGeo, targetMat);
+              // Float slightly above the platform
+              target.position.set(0, h + 1.0, 0); 
+              group.add(target);
+              
+              window.shootableTargets.push(target);
+              group.userData.targets = [target];
+            }
+
             group.userData.originalY = group.position.y;
             group.userData.speed = 0.5 + Math.random() * 0.5;
             group.userData.offset = Math.random() * Math.PI * 2;
@@ -155,6 +170,14 @@
           this.platformGroup.children.forEach(child => {
             child.position.y = child.userData.originalY + Math.sin(elapsedTime * child.userData.speed + child.userData.offset) * 0.15;
             child.rotation.y += 0.002;
+
+            // Spin the targets locally
+            if (child.userData.targets) {
+              child.userData.targets.forEach(t => {
+                t.rotation.y += 0.05;
+                t.rotation.x += 0.02;
+              });
+            }
           });
           this.stars.rotation.y += 0.0001;
           this.stars.rotation.x += 0.00005;
@@ -168,6 +191,8 @@
           speed: {type: 'number', default: 20} // Bumped speed slightly for manual aiming
         },
         tick: function(time, timeDelta) {
+          if (!this.el.parentNode) return; // Safeguard if already destroyed
+
           const deltaSec = timeDelta / 1000;
           this.el.object3D.position.x += this.data.direction.x * this.data.speed * deltaSec;
           this.el.object3D.position.y += this.data.direction.y * this.data.speed * deltaSec;
@@ -175,6 +200,30 @@
 
           if (this.el.object3D.position.length() > 60) {
             this.el.parentNode.removeChild(this.el);
+            return;
+          }
+
+          // TARGET COLLISION DETECTION
+          const myPos = this.el.object3D.position;
+          if (window.shootableTargets) {
+            for (let i = window.shootableTargets.length - 1; i >= 0; i--) {
+              const t = window.shootableTargets[i];
+              if (!t.parent) {
+                window.shootableTargets.splice(i, 1); // Clean up dead targets
+                continue;
+              }
+              
+              const targetPos = new THREE.Vector3();
+              t.getWorldPosition(targetPos);
+              
+              if (targetPos.distanceTo(myPos) < 0.6) {
+                t.parent.remove(t);
+                window.shootableTargets.splice(i, 1);
+                this.el.parentNode.removeChild(this.el);
+                console.log("Target shattered.");
+                return;
+              }
+            }
           }
         }
       });
@@ -275,6 +324,7 @@
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.cooldown = false;
+          this.camera = document.querySelector('a-camera');
 
           // The visual barrel of the gun. We will snap this directly to the index finger.
           this.gunMesh = document.createElement('a-entity');
@@ -283,6 +333,33 @@
           // Rotate it so the cylinder aligns with the Z axis (forward)
           this.gunMesh.setAttribute('rotation', '90 0 0');
           this.el.appendChild(this.gunMesh);
+
+          // THE LASER POINTER
+          this.laser = document.createElement('a-entity');
+          this.laser.setAttribute('geometry', 'primitive: cylinder; radius: 0.002; height: 20');
+          this.laser.setAttribute('material', 'color: #ff0044; shader: flat; transparent: true; opacity: 0.6');
+          this.laser.setAttribute('position', '0 0 -10'); // Shift pivot to the base
+          
+          this.laserPivot = document.createElement('a-entity');
+          this.laserPivot.appendChild(this.laser);
+          this.laserPivot.setAttribute('visible', 'false');
+          this.el.appendChild(this.laserPivot);
+
+          // MESH HIJACKER FOR RAINBOW EFFECT
+          this.handMesh = null;
+          this.defaultColor = null;
+          this.el.addEventListener('model-loaded', () => {
+            const mesh = this.el.getObject3D('mesh');
+            if (mesh) {
+              mesh.traverse((node) => {
+                if (node.isMesh && node.material) {
+                  this.handMesh = node;
+                  this.handMesh.material = node.material.clone(); // Isolate from left hand
+                  this.defaultColor = this.handMesh.material.color.clone();
+                }
+              });
+            }
+          });
         },
         
         tick: function (time, timeDelta) {
@@ -292,40 +369,63 @@
 
           const bones = trackingComponent.bones;
           
-          // WebXR Standard Joint Indices:
-          // 0: Wrist
-          // 4: Thumb Tip
-          // 5: Index Finger Metacarpal (Base Knuckle)
-          // 9: Index Finger Tip
-          
           const wristPos = new THREE.Vector3();
           const thumbTipPos = new THREE.Vector3();
           const indexBasePos = new THREE.Vector3();
           const indexTipPos = new THREE.Vector3();
+          const middleTipPos = new THREE.Vector3();
 
           // Extract absolute world coordinates from the bone matrix
           bones[0].getWorldPosition(wristPos);
           bones[4].getWorldPosition(thumbTipPos);
           bones[5].getWorldPosition(indexBasePos);
           bones[9].getWorldPosition(indexTipPos);
+          bones[14].getWorldPosition(middleTipPos); // We need this to detect the curled posture
 
           // 1. AIM MATH: Draw a vector from your wrist straight out through your index tip
           const aimDirection = new THREE.Vector3().subVectors(indexTipPos, wristPos).normalize();
 
           // Snap the gun barrel visually to your index finger base and look down the vector
           this.gunMesh.object3D.position.copy(indexBasePos);
-          // Small offset so it sits above your knuckle
           this.gunMesh.object3D.position.y += 0.02; 
           this.gunMesh.object3D.lookAt(indexTipPos);
+
+          // POSE DETECTION: Are you actually making a finger gun?
+          // If the middle finger is significantly closer to the wrist than the index finger, it's curled.
+          const indexLength = indexTipPos.distanceTo(wristPos);
+          const midLength = middleTipPos.distanceTo(wristPos);
+          const isGunPose = (midLength < indexLength * 0.75);
+
+          if (isGunPose) {
+            // Activate Laser
+            this.laserPivot.setAttribute('visible', 'true');
+            this.laserPivot.object3D.position.copy(indexTipPos);
+            // Look down the aim vector
+            const targetPoint = new THREE.Vector3().copy(indexTipPos).add(aimDirection);
+            this.laserPivot.object3D.lookAt(targetPoint);
+
+            // Radioactive Rainbow Gradient Injection
+            if (this.handMesh) {
+              const hue = (time % 2000) / 2000;
+              this.handMesh.material.color.setHSL(hue, 1.0, 0.5);
+              this.handMesh.material.emissive.setHSL(hue, 1.0, 0.2);
+            }
+          } else {
+            // Stand down
+            this.laserPivot.setAttribute('visible', 'false');
+            if (this.handMesh && this.defaultColor) {
+              this.handMesh.material.color.copy(this.defaultColor);
+              this.handMesh.material.emissive.setHex(0x000000);
+            }
+          }
 
           if (this.cooldown) return;
 
           // 2. TRIGGER MATH: Measure the distance between thumb tip and the base of the index finger.
-          // When you drop your thumb ("cocking the hammer"), the distance drastically shrinks.
           const hammerDistance = thumbTipPos.distanceTo(indexBasePos);
           
-          // If the thumb tip gets closer than 4.5 centimeters to the index knuckle, FIRE.
-          if (hammerDistance < 0.045) { 
+          // Only fire if the gun is armed AND the hammer drops
+          if (isGunPose && hammerDistance < 0.045) { 
             this.fireCannon(indexTipPos, aimDirection);
           }
         },
