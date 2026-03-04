@@ -5,7 +5,7 @@
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
     
     <script>
-      // 1. PINCH DEBUGGER (Visual Feedback for Tracking)
+      // 1. PINCH DEBUGGER
       AFRAME.registerComponent('pinch-debugger', {
         init: function() {
           this.indicator = document.createElement('a-entity');
@@ -14,6 +14,7 @@
           this.el.appendChild(this.indicator);
 
           this.el.addEventListener('pinchstarted', () => {
+            // Direct object3D manipulation is faster, but for discrete events setAttribute is acceptable.
             this.indicator.setAttribute('material', 'color: #00ff00; wireframe: false; opacity: 1');
             console.log(this.el.id + " PINCH INITIATED");
           });
@@ -55,7 +56,6 @@
           const deltaSec = timeDelta / 1000;
 
           this.el.object3D.position.addScaledVector(direction, speed * deltaSec);
-          
           this.el.object3D.rotation.x += 0.05;
           this.el.object3D.rotation.y += 0.05;
 
@@ -72,7 +72,7 @@
         }
       });
 
-      // 4. THE SPATIAL TEAR MANAGER (Debug Visuals)
+      // 4. THE SPATIAL TEAR MANAGER (Optimized for Three.js Direct Manipulation)
       AFRAME.registerComponent('rift-manager', {
         init: function () {
           this.leftPinching = false;
@@ -80,6 +80,9 @@
           this.rift = document.querySelector('#dimensional-rift');
           this.camera = document.querySelector('a-camera');
           this.lastSpawnTime = 0;
+          
+          // Start the rift completely hidden at the engine level
+          this.rift.object3D.visible = false;
           
           const leftHand = document.querySelector('#leftHand');
           const rightHand = document.querySelector('#rightHand');
@@ -101,20 +104,28 @@
             leftEl.object3D.getWorldPosition(leftPos);
             rightEl.object3D.getWorldPosition(rightPos);
             
-            // Math check: We subtract a small deadzone so the rift starts at size 0 when hands are touching
             const distance = leftPos.distanceTo(rightPos);
-            const tearScale = Math.max(0, distance - 0.1) * 5; 
             
+            // Aggressive scaling so you don't have to pull your arms out of their sockets
+            const tearScale = distance * 4; 
+            
+            // Find the physical midpoint between hands
             const midPoint = new THREE.Vector3().addVectors(leftPos, rightPos).multiplyScalar(0.5);
             
+            // Vector Projection: Push the rift forward along your gaze vector so it spawns *in front* of your fingers
+            const camDir = new THREE.Vector3();
+            this.camera.object3D.getWorldDirection(camDir);
+            // WebGL forward is -Z, but getWorldDirection accounts for that. We add the vector.
+            midPoint.addScaledVector(camDir, 0.15); // Pushed 15cm forward
+            
+            // Direct Three.js bypass (No DOM manipulation = fast)
             this.rift.object3D.position.copy(midPoint);
             this.rift.object3D.scale.set(tearScale, tearScale, 1); 
+            this.rift.object3D.visible = true;
             
             const camPos = new THREE.Vector3();
             this.camera.object3D.getWorldPosition(camPos);
             this.rift.object3D.lookAt(camPos);
-            
-            this.rift.setAttribute('material', 'opacity: 1');
 
             if (tearScale > 1.0 && time - this.lastSpawnTime > 800) {
               this.spawnParasite(midPoint);
@@ -134,22 +145,20 @@
 
         collapseRift: function() {
           this.rift.object3D.scale.set(0, 0, 0);
-          this.rift.setAttribute('material', 'opacity: 0');
+          this.rift.object3D.visible = false;
         }
       });
 
-      // 5. THE KINETIC RECOIL CANNON (Debug Mesh added)
+      // 5. THE KINETIC RECOIL CANNON (Optimized)
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.previousPosition = new THREE.Vector3();
           this.cooldown = false;
           this.camera = document.querySelector('a-camera');
 
-          // The debug Gun Mesh
           this.gunMesh = document.createElement('a-entity');
           this.gunMesh.setAttribute('geometry', 'primitive: box; width: 0.04; height: 0.04; depth: 0.2');
           this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
-          // Offset it slightly forward so it looks like a barrel on your wrist
           this.gunMesh.setAttribute('position', '0 0 -0.1'); 
           this.el.appendChild(this.gunMesh);
         },
@@ -160,7 +169,6 @@
           const currentPosition = new THREE.Vector3();
           this.el.object3D.getWorldPosition(currentPosition);
 
-          // Lowered the velocity threshold slightly for easier debugging
           const velocityY = (currentPosition.y - this.previousPosition.y) / timeDelta;
           
           if (velocityY > 0.004) { 
@@ -172,8 +180,6 @@
 
         fireCannon: function(handPos) {
           this.cooldown = true;
-          
-          // Flash the gun mesh solid white to prove the math triggered
           this.gunMesh.setAttribute('material', 'color: #ffffff; wireframe: false');
 
           const projectile = document.createElement('a-entity');
@@ -188,7 +194,6 @@
           projectile.setAttribute('projectile-behavior', `direction: ${direction.x} ${direction.y} ${direction.z}`);
           this.el.sceneEl.appendChild(projectile);
 
-          // Reset the gun mesh back to wireframe and release cooldown
           setTimeout(() => { 
             this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
             this.cooldown = false; 
@@ -198,22 +203,19 @@
     </script>
   </head>
   <body>
-    <!-- Standard VR Scene -->
     <a-scene webxr="optionalFeatures: hand-tracking;" background="color: #111111" rift-manager>
       
       <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222222" material="wireframe: true"></a-plane>
 
-      <!-- DEBUG RIFT: Simple, undeniable magenta square -->
+      <!-- DEBUG RIFT: Opacity is permanently 1, but Three.js visibility handles the toggle -->
       <a-entity id="dimensional-rift" 
                 geometry="primitive: plane; width: 1; height: 1" 
-                material="color: #ff00ff; side: double; transparent: true; opacity: 0" 
-                scale="0 0 0">
+                material="color: #ff00ff; side: double; transparent: true; opacity: 1">
       </a-entity>
 
       <!-- Player Rig -->
       <a-entity id="rig" position="0 0 0">
         <a-camera position="0 1.6 0"></a-camera>
-        <!-- Added pinch-debugger to both hands -->
         <a-entity id="leftHand" hand-tracking-controls="hand: left;" pinch-debugger></a-entity>
         <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon pinch-debugger></a-entity>
       </a-entity>
