@@ -43,7 +43,7 @@
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
         const DRAW_VELOCITY_THRESH = 0.005; // Minimum finger speed to start drawing
-        const DRAW_TIMEOUT = 0.5; // Seconds of stillness to finalize gesture
+        const DRAW_TIMEOUT = 1.2; // Increased to give the human brain time to process drawing
 
         const smoothedJoints = new Map();
 
@@ -287,7 +287,13 @@
         function isHandOpen(hand) {
             if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
             const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
-            return dist > 0.10; 
+            return dist > 0.10; // Open hand threshold
+        }
+
+        function isHandClosed(hand) {
+            if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
+            const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
+            return dist < 0.07; // Tight fist threshold (Hysteresis prevents accidental drops)
         }
 
         function fireSpell(type, origin) {
@@ -383,11 +389,12 @@
                 });
 
                 const isOp = isHandOpen(hand);
+                const isClosed = isHandClosed(hand);
                 const wristPos = hand.joints['wrist'].position;
                 const indexPos = hand.joints['index-finger-tip'].position;
 
                 // Grab / Drop
-                if (hand.userData.isHolding && !isOp && !isDrawing) {
+                if (hand.userData.isHolding && isClosed && !isDrawing) {
                     orbs.forEach(orb => {
                         if (orb.userData.heldBy === hand.userData.handedness) {
                             orb.userData.heldBy = null; 
