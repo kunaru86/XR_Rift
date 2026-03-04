@@ -362,7 +362,7 @@
                 // BEAM WEAPON: Raycast forward from camera direction
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
                 
-                // Visual Effect - FIXED: rotated -Math.PI/2 to shoot away from the player
+                // Visual Effect - rotated -Math.PI/2 to shoot away from the player
                 const geo = new THREE.CylinderGeometry(0.01, 0.01, 10);
                 geo.translate(0, 5, 0); 
                 geo.rotateX(-Math.PI / 2); 
@@ -388,9 +388,9 @@
                 setTimeout(() => scene.remove(mesh), 200);
 
             } else if (type === 'triangle') {
-                // KINETIC REPULSE: Push all nearby enemies away
-                const REPULSE_RADIUS = 3.0; // Meters
-                const PUSH_FORCE = 3.0;
+                // KINETIC REPULSE: Massively Buffed to launch enemies away
+                const REPULSE_RADIUS = 5.0; // Increased radius
+                const PUSH_FORCE = 15.0; // Massive outward force
                 
                 // Visual Effect
                 const geo = new THREE.IcosahedronGeometry(0.1, 1);
@@ -571,24 +571,33 @@
         }
 
         function updateEntities(timeDelta, timeSeconds) {
-            // Spawn Enemy Logic
+            // Spawn Enemy Logic (180 degrees in front of the player)
             enemySpawnTimer -= timeDelta;
             if (enemySpawnTimer <= 0) {
                 enemySpawnTimer = ENEMY_SPAWN_RATE;
-                const angle = Math.random() * Math.PI * 2;
+                // An angle between PI and 2*PI ensures they only spawn on the far side 
+                // of the Heart Stone, never behind you.
+                const angle = Math.PI + (Math.random() * Math.PI); 
                 const radius = 5; // Spawn 5 meters out
                 const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
                 createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius));
             }
 
-            // Spawn Ammo Logic (near player)
+            // Spawn Ammo Logic (Tightly clustered in front of player)
             orbSpawnTimer -= timeDelta;
             if (orbSpawnTimer <= 0 && orbs.length < 5) {
                 orbSpawnTimer = ORB_SPAWN_RATE;
-                const angle = Math.random() * Math.PI * 2;
-                const radius = 0.6 + Math.random() * 0.4; // 0.6 to 1m radius around player
-                const yPos = 1.0 + Math.random() * 0.5; // Waist/Chest height
-                createOrb(new THREE.Vector3(camera.position.x + Math.cos(angle) * radius, yPos, camera.position.z + Math.sin(angle) * radius));
+                // Spawning biased forward
+                const angle = Math.PI + (Math.random() * Math.PI); 
+                const radius = 0.3 + Math.random() * 0.2; // 0.3m to 0.5m right in front of you
+                const yPos = 1.0 + Math.random() * 0.4; // Waist/Chest height
+                
+                // Position relative to the camera to ensure they are easily reachable
+                createOrb(new THREE.Vector3(
+                    camera.position.x + Math.cos(angle) * radius, 
+                    yPos, 
+                    camera.position.z + Math.sin(angle) * radius
+                ));
             }
 
             const heartPos = heartStone.position;
@@ -615,8 +624,9 @@
                         enemies.splice(i, 1);
                     }
                 } else if (enemy.userData.state === 'repulsed') {
+                    // Apply heavy physics velocity
                     enemy.position.add(enemy.userData.velocity.clone().multiplyScalar(timeDelta));
-                    enemy.userData.velocity.multiplyScalar(0.92); 
+                    enemy.userData.velocity.multiplyScalar(0.92); // Friction
                     if (enemy.userData.velocity.length() < 0.2) {
                         enemy.userData.state = 'homing';
                     }
