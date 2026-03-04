@@ -54,16 +54,14 @@
         `
       });
 
-      // 2. FLOATING ENVIRONMENT GENERATOR (Translated to A-Frame ECS)
+      // 2. FLOATING ENVIRONMENT GENERATOR
       AFRAME.registerComponent('floating-level', {
         init: function () {
           const scene = this.el.sceneEl.object3D;
           
-          // Background and Fog
           scene.background = new THREE.Color(0x111122);
           scene.fog = new THREE.Fog(0x111122, 20, 60);
 
-          // Lighting Setup
           const ambientLight = new THREE.AmbientLight(0x404060);
           scene.add(ambientLight);
 
@@ -79,7 +77,6 @@
           backLight.position.set(0, 5, -15);
           scene.add(backLight);
 
-          // Starfield
           const starsGeometry = new THREE.BufferGeometry();
           const starsCount = 1000;
           const starPositions = new Float32Array(starsCount * 3);
@@ -93,10 +90,9 @@
           this.stars = new THREE.Points(starsGeometry, starsMaterial);
           scene.add(this.stars);
 
-          // Platforms
           this.platformGroup = new THREE.Group();
           const platformsData = [
-            [6, 6, 1.5, 0x4a90e2, 0, 2, 0], // Spawn platform
+            [6, 6, 1.5, 0x4a90e2, 0, 2, 0], 
             [2.5, 2.5, 0.8, 0xe67e22, -5, 3.5, 4],
             [2.5, 2.5, 0.8, 0xe67e22, 5, 3.2, -4],
             [2, 2, 0.6, 0x2ecc71, -3, 5.0, -5],
@@ -129,7 +125,6 @@
             group.add(cube);
             group.add(line);
             
-            // Initialization for animation
             group.userData.originalY = group.position.y;
             group.userData.speed = 0.5 + Math.random() * 0.5;
             group.userData.offset = Math.random() * Math.PI * 2;
@@ -138,7 +133,6 @@
           });
           scene.add(this.platformGroup);
 
-          // Energy Dust
           const particleGeo = new THREE.BufferGeometry();
           const particleCount = 300;
           const particlePositions = new Float32Array(particleCount * 3);
@@ -158,12 +152,10 @@
         
         tick: function (time, timeDelta) {
           const elapsedTime = time / 1000;
-          
           this.platformGroup.children.forEach(child => {
             child.position.y = child.userData.originalY + Math.sin(elapsedTime * child.userData.speed + child.userData.offset) * 0.15;
             child.rotation.y += 0.002;
           });
-
           this.stars.rotation.y += 0.0001;
           this.stars.rotation.x += 0.00005;
         }
@@ -173,7 +165,7 @@
       AFRAME.registerComponent('projectile-behavior', {
         schema: {
           direction: {type: 'vec3'},
-          speed: {type: 'number', default: 15}
+          speed: {type: 'number', default: 20} // Bumped speed slightly for manual aiming
         },
         tick: function(time, timeDelta) {
           const deltaSec = timeDelta / 1000;
@@ -279,51 +271,81 @@
         }
       });
 
-      // 6. THE KINETIC RECOIL CANNON 
+      // 6. THE SKELETAL HAND CANNON (Pure Bone Matrix Calculation)
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
-          this.previousPosition = new THREE.Vector3();
           this.cooldown = false;
-          this.camera = document.querySelector('a-camera');
 
+          // The visual barrel of the gun. We will snap this directly to the index finger.
           this.gunMesh = document.createElement('a-entity');
-          this.gunMesh.setAttribute('geometry', 'primitive: box; width: 0.04; height: 0.04; depth: 0.2');
+          this.gunMesh.setAttribute('geometry', 'primitive: cylinder; radius: 0.01; height: 0.15');
           this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
-          this.gunMesh.setAttribute('position', '0 0 -0.1'); 
+          // Rotate it so the cylinder aligns with the Z axis (forward)
+          this.gunMesh.setAttribute('rotation', '90 0 0');
           this.el.appendChild(this.gunMesh);
         },
         
         tick: function (time, timeDelta) {
-          if (this.cooldown || timeDelta === 0) return;
+          // A-Frame stores the raw WebXR skeletal joints here once the mesh loads
+          const trackingComponent = this.el.components['hand-tracking-controls'];
+          if (!trackingComponent || !trackingComponent.bones || trackingComponent.bones.length === 0) return;
 
-          const currentPosition = new THREE.Vector3();
-          this.el.object3D.getWorldPosition(currentPosition);
-
-          const velocityY = (currentPosition.y - this.previousPosition.y) / timeDelta;
+          const bones = trackingComponent.bones;
           
-          if (velocityY > 0.004) { 
-            this.fireCannon(currentPosition);
+          // WebXR Standard Joint Indices:
+          // 0: Wrist
+          // 4: Thumb Tip
+          // 5: Index Finger Metacarpal (Base Knuckle)
+          // 9: Index Finger Tip
+          
+          const wristPos = new THREE.Vector3();
+          const thumbTipPos = new THREE.Vector3();
+          const indexBasePos = new THREE.Vector3();
+          const indexTipPos = new THREE.Vector3();
+
+          // Extract absolute world coordinates from the bone matrix
+          bones[0].getWorldPosition(wristPos);
+          bones[4].getWorldPosition(thumbTipPos);
+          bones[5].getWorldPosition(indexBasePos);
+          bones[9].getWorldPosition(indexTipPos);
+
+          // 1. AIM MATH: Draw a vector from your wrist straight out through your index tip
+          const aimDirection = new THREE.Vector3().subVectors(indexTipPos, wristPos).normalize();
+
+          // Snap the gun barrel visually to your index finger base and look down the vector
+          this.gunMesh.object3D.position.copy(indexBasePos);
+          // Small offset so it sits above your knuckle
+          this.gunMesh.object3D.position.y += 0.02; 
+          this.gunMesh.object3D.lookAt(indexTipPos);
+
+          if (this.cooldown) return;
+
+          // 2. TRIGGER MATH: Measure the distance between thumb tip and the base of the index finger.
+          // When you drop your thumb ("cocking the hammer"), the distance drastically shrinks.
+          const hammerDistance = thumbTipPos.distanceTo(indexBasePos);
+          
+          // If the thumb tip gets closer than 4.5 centimeters to the index knuckle, FIRE.
+          if (hammerDistance < 0.045) { 
+            this.fireCannon(indexTipPos, aimDirection);
           }
-          
-          this.previousPosition.copy(currentPosition);
         },
 
-        fireCannon: function(handPos) {
+        fireCannon: function(originPos, aimVector) {
           this.cooldown = true;
           this.gunMesh.setAttribute('material', 'color: #ffffff; wireframe: false');
 
           const projectile = document.createElement('a-entity');
           projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.05');
           projectile.setAttribute('material', 'color: #00ffcc; shader: flat');
-          projectile.setAttribute('position', handPos);
+          
+          // Spawn exactly at the tip of the index finger
+          projectile.setAttribute('position', originPos);
 
-          const direction = new THREE.Vector3();
-          this.camera.object3D.getWorldDirection(direction);
-          direction.multiplyScalar(-1); 
-
-          projectile.setAttribute('projectile-behavior', `direction: ${direction.x} ${direction.y} ${direction.z}`);
+          // Pass the mathematically calculated bone vector to the projectile
+          projectile.setAttribute('projectile-behavior', `direction: ${aimVector.x} ${aimVector.y} ${aimVector.z}`);
           this.el.sceneEl.appendChild(projectile);
 
+          // 300ms cooldown to prevent crashing the CPU
           setTimeout(() => { 
             this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
             this.cooldown = false; 
@@ -333,20 +355,19 @@
     </script>
   </head>
   <body>
-    <!-- floating-level component overrides background color and generates geometry -->
     <a-scene webxr="optionalFeatures: hand-tracking;" floating-level rift-manager>
 
-      <!-- Dimensional Rift Plane, now using the void shader again -->
       <a-entity id="dimensional-rift" 
                 geometry="primitive: plane; width: 1; height: 1" 
                 material="shader: rift-void; transparent: true; side: double; depthWrite: false" 
                 visible="false">
       </a-entity>
 
-      <!-- Player Rig - Spawned at Y: 3.5 to stand perfectly on the central platform -->
       <a-entity id="rig" position="0 3.5 0">
         <a-camera position="0 1.6 0"></a-camera>
         <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
+        
+        <!-- Right hand now runs the pure bone matrix logic -->
         <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon></a-entity>
       </a-entity>
 
