@@ -5,7 +5,7 @@
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
     
     <script>
-      // 1. THE SPATIAL TEAR SHADER (Restored the Void)
+      // 1. THE SPATIAL TEAR SHADER
       AFRAME.registerShader('rift-void', {
         schema: {
           timeMsec: {type: 'time', is: 'uniform'},
@@ -54,7 +54,7 @@
         `
       });
 
-      // 2. FLOATING ENVIRONMENT GENERATOR
+      // 2. FLOATING ENVIRONMENT GENERATOR (Forward Line of Sight Edition)
       AFRAME.registerComponent('floating-level', {
         init: function () {
           const scene = this.el.sceneEl.object3D;
@@ -91,22 +91,20 @@
           scene.add(this.stars);
 
           this.platformGroup = new THREE.Group();
-          window.shootableTargets = []; // Global array for fast collision lookups
+          window.shootableTargets = []; 
 
+          // Forced Line of Sight Spawning. -Z is straight ahead.
           const platformsData = [
-            [6, 6, 1.5, 0x4a90e2, 0, 2, 0], 
-            [2.5, 2.5, 0.8, 0xe67e22, -5, 3.5, 4],
-            [2.5, 2.5, 0.8, 0xe67e22, 5, 3.2, -4],
-            [2, 2, 0.6, 0x2ecc71, -3, 5.0, -5],
-            [2, 2, 0.6, 0x2ecc71, 4, 4.5, 5],
-            [3, 3, 1.0, 0xf1c40f, -6, 6.0, -2],
-            [3, 3, 1.0, 0xf1c40f, 6, 5.0, 2],
-            [1.5, 1.5, 0.5, 0xe74c3c, -2, 7.5, 6],
-            [1.5, 1.5, 0.5, 0xe74c3c, 2, 8.0, -6],
-            [1.2, 1.2, 0.4, 0x9b59b6, -4, 10, 3],
-            [1.2, 1.2, 0.4, 0x9b59b6, 3, 11, -3],
-            [1.8, 1.8, 0.6, 0x3498db, -5, 13, -4],
-            [1.8, 1.8, 0.6, 0x3498db, 5, 12.5, 4],
+            [6, 6, 1.5, 0x4a90e2, 0, 2, 0], // The floor you stand on
+            [2.5, 2.5, 0.8, 0xe67e22, -3, 3.5, -6],
+            [2.5, 2.5, 0.8, 0xe67e22, 0, 4.0, -8],
+            [2.5, 2.5, 0.8, 0xe67e22, 3, 3.5, -6],
+            [2, 2, 0.6, 0x2ecc71, -5, 5.0, -10],
+            [2, 2, 0.6, 0x2ecc71, 5, 4.5, -9],
+            [3, 3, 1.0, 0xf1c40f, -2, 6.0, -12],
+            [3, 3, 1.0, 0xf1c40f, 2, 5.0, -12],
+            [1.5, 1.5, 0.5, 0xe74c3c, -4, 8.0, -15],
+            [1.5, 1.5, 0.5, 0xe74c3c, 4, 7.5, -14]
           ];
 
           platformsData.forEach(data => {
@@ -127,13 +125,12 @@
             group.add(cube);
             group.add(line);
             
-            // TARGET GENERATION: 70% chance to spawn a target on this platform
-            if (Math.random() > 0.3) {
-              const targetGeo = new THREE.OctahedronGeometry(0.3);
+            // Guarantee targets on everything except the floor you stand on
+            if (z < -1) {
+              const targetGeo = new THREE.OctahedronGeometry(0.4); // Made targets larger
               const targetMat = new THREE.MeshStandardMaterial({ color: 0xff0044, emissive: 0xaa0022, wireframe: true });
               const target = new THREE.Mesh(targetGeo, targetMat);
-              // Float slightly above the platform
-              target.position.set(0, h + 1.0, 0); 
+              target.position.set(0, h + 1.2, 0); 
               group.add(target);
               
               window.shootableTargets.push(target);
@@ -171,7 +168,6 @@
             child.position.y = child.userData.originalY + Math.sin(elapsedTime * child.userData.speed + child.userData.offset) * 0.15;
             child.rotation.y += 0.002;
 
-            // Spin the targets locally
             if (child.userData.targets) {
               child.userData.targets.forEach(t => {
                 t.rotation.y += 0.05;
@@ -184,14 +180,14 @@
         }
       });
 
-      // 3. PROJECTILE BEHAVIOR
+      // 3. PROJECTILE BEHAVIOR (Slower, Larger, Visible)
       AFRAME.registerComponent('projectile-behavior', {
         schema: {
           direction: {type: 'vec3'},
-          speed: {type: 'number', default: 20} // Bumped speed slightly for manual aiming
+          speed: {type: 'number', default: 12} // Reduced speed from 20 to 12
         },
         tick: function(time, timeDelta) {
-          if (!this.el.parentNode) return; // Safeguard if already destroyed
+          if (!this.el.parentNode) return; 
 
           const deltaSec = timeDelta / 1000;
           this.el.object3D.position.x += this.data.direction.x * this.data.speed * deltaSec;
@@ -203,20 +199,20 @@
             return;
           }
 
-          // TARGET COLLISION DETECTION
           const myPos = this.el.object3D.position;
           if (window.shootableTargets) {
             for (let i = window.shootableTargets.length - 1; i >= 0; i--) {
               const t = window.shootableTargets[i];
               if (!t.parent) {
-                window.shootableTargets.splice(i, 1); // Clean up dead targets
+                window.shootableTargets.splice(i, 1); 
                 continue;
               }
               
               const targetPos = new THREE.Vector3();
               t.getWorldPosition(targetPos);
               
-              if (targetPos.distanceTo(myPos) < 0.6) {
+              // Collision radius slightly expanded to be forgiving
+              if (targetPos.distanceTo(myPos) < 0.8) {
                 t.parent.remove(t);
                 window.shootableTargets.splice(i, 1);
                 this.el.parentNode.removeChild(this.el);
@@ -320,32 +316,33 @@
         }
       });
 
-      // 6. THE SKELETAL HAND CANNON (Pure Bone Matrix Calculation)
+      // 6. THE SKELETAL HAND CANNON (Now accurately handles Lasers and Dual Wielding)
       AFRAME.registerComponent('hand-cannon', {
         init: function () {
           this.cooldown = false;
           this.camera = document.querySelector('a-camera');
 
-          // The visual barrel of the gun. We will snap this directly to the index finger.
           this.gunMesh = document.createElement('a-entity');
           this.gunMesh.setAttribute('geometry', 'primitive: cylinder; radius: 0.01; height: 0.15');
           this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
-          // Rotate it so the cylinder aligns with the Z axis (forward)
           this.gunMesh.setAttribute('rotation', '90 0 0');
           this.el.appendChild(this.gunMesh);
 
-          // THE LASER POINTER
+          // THE LASER POINTER (Fixed Orientation)
           this.laser = document.createElement('a-entity');
-          this.laser.setAttribute('geometry', 'primitive: cylinder; radius: 0.002; height: 20');
-          this.laser.setAttribute('material', 'color: #ff0044; shader: flat; transparent: true; opacity: 0.6');
-          this.laser.setAttribute('position', '0 0 -10'); // Shift pivot to the base
+          this.laser.setAttribute('geometry', 'primitive: cylinder; radius: 0.003; height: 20');
+          this.laser.setAttribute('material', 'color: #ff0044; shader: flat; transparent: true; opacity: 0.5');
+          // Rotate 90 degrees on X to align the cylinder along the Z-axis
+          this.laser.setAttribute('rotation', '90 0 0'); 
+          // Push it forward by half its length so the base originates at the pivot point
+          this.laser.setAttribute('position', '0 0 -10'); 
           
           this.laserPivot = document.createElement('a-entity');
           this.laserPivot.appendChild(this.laser);
-          this.laserPivot.setAttribute('visible', 'false');
+          this.laserPivot.setAttribute('visible', false);
           this.el.appendChild(this.laserPivot);
 
-          // MESH HIJACKER FOR RAINBOW EFFECT
+          // MESH HIJACKER
           this.handMesh = null;
           this.defaultColor = null;
           this.el.addEventListener('model-loaded', () => {
@@ -354,7 +351,7 @@
               mesh.traverse((node) => {
                 if (node.isMesh && node.material) {
                   this.handMesh = node;
-                  this.handMesh.material = node.material.clone(); // Isolate from left hand
+                  this.handMesh.material = node.material.clone(); 
                   this.defaultColor = this.handMesh.material.color.clone();
                 }
               });
@@ -363,7 +360,6 @@
         },
         
         tick: function (time, timeDelta) {
-          // A-Frame stores the raw WebXR skeletal joints here once the mesh loads
           const trackingComponent = this.el.components['hand-tracking-controls'];
           if (!trackingComponent || !trackingComponent.bones || trackingComponent.bones.length === 0) return;
 
@@ -375,44 +371,36 @@
           const indexTipPos = new THREE.Vector3();
           const middleTipPos = new THREE.Vector3();
 
-          // Extract absolute world coordinates from the bone matrix
           bones[0].getWorldPosition(wristPos);
           bones[4].getWorldPosition(thumbTipPos);
           bones[5].getWorldPosition(indexBasePos);
           bones[9].getWorldPosition(indexTipPos);
-          bones[14].getWorldPosition(middleTipPos); // We need this to detect the curled posture
+          bones[14].getWorldPosition(middleTipPos);
 
-          // 1. AIM MATH: Draw a vector from your wrist straight out through your index tip
           const aimDirection = new THREE.Vector3().subVectors(indexTipPos, wristPos).normalize();
 
-          // Snap the gun barrel visually to your index finger base and look down the vector
           this.gunMesh.object3D.position.copy(indexBasePos);
           this.gunMesh.object3D.position.y += 0.02; 
           this.gunMesh.object3D.lookAt(indexTipPos);
 
-          // POSE DETECTION: Are you actually making a finger gun?
-          // If the middle finger is significantly closer to the wrist than the index finger, it's curled.
           const indexLength = indexTipPos.distanceTo(wristPos);
           const midLength = middleTipPos.distanceTo(wristPos);
           const isGunPose = (midLength < indexLength * 0.75);
 
           if (isGunPose) {
-            // Activate Laser
-            this.laserPivot.setAttribute('visible', 'true');
+            this.laserPivot.setAttribute('visible', true);
             this.laserPivot.object3D.position.copy(indexTipPos);
-            // Look down the aim vector
+            
             const targetPoint = new THREE.Vector3().copy(indexTipPos).add(aimDirection);
             this.laserPivot.object3D.lookAt(targetPoint);
 
-            // Radioactive Rainbow Gradient Injection
             if (this.handMesh) {
               const hue = (time % 2000) / 2000;
               this.handMesh.material.color.setHSL(hue, 1.0, 0.5);
               this.handMesh.material.emissive.setHSL(hue, 1.0, 0.2);
             }
           } else {
-            // Stand down
-            this.laserPivot.setAttribute('visible', 'false');
+            this.laserPivot.setAttribute('visible', false);
             if (this.handMesh && this.defaultColor) {
               this.handMesh.material.color.copy(this.defaultColor);
               this.handMesh.material.emissive.setHex(0x000000);
@@ -421,10 +409,8 @@
 
           if (this.cooldown) return;
 
-          // 2. TRIGGER MATH: Measure the distance between thumb tip and the base of the index finger.
           const hammerDistance = thumbTipPos.distanceTo(indexBasePos);
           
-          // Only fire if the gun is armed AND the hammer drops
           if (isGunPose && hammerDistance < 0.045) { 
             this.fireCannon(indexTipPos, aimDirection);
           }
@@ -435,17 +421,14 @@
           this.gunMesh.setAttribute('material', 'color: #ffffff; wireframe: false');
 
           const projectile = document.createElement('a-entity');
-          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.05');
+          // Made the projectile significantly larger so you can see it fly
+          projectile.setAttribute('geometry', 'primitive: sphere; radius: 0.08');
           projectile.setAttribute('material', 'color: #00ffcc; shader: flat');
-          
-          // Spawn exactly at the tip of the index finger
           projectile.setAttribute('position', originPos);
 
-          // Pass the mathematically calculated bone vector to the projectile
           projectile.setAttribute('projectile-behavior', `direction: ${aimVector.x} ${aimVector.y} ${aimVector.z}`);
           this.el.sceneEl.appendChild(projectile);
 
-          // 300ms cooldown to prevent crashing the CPU
           setTimeout(() => { 
             this.gunMesh.setAttribute('material', 'color: #0088ff; wireframe: true');
             this.cooldown = false; 
@@ -465,9 +448,8 @@
 
       <a-entity id="rig" position="0 3.5 0">
         <a-camera position="0 1.6 0"></a-camera>
-        <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
-        
-        <!-- Right hand now runs the pure bone matrix logic -->
+        <!-- Both hands are now armed -->
+        <a-entity id="leftHand" hand-tracking-controls="hand: left;" hand-cannon></a-entity>
         <a-entity id="rightHand" hand-tracking-controls="hand: right;" hand-cannon></a-entity>
       </a-entity>
 
