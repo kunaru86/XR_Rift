@@ -113,6 +113,7 @@
         let heartHealth = 100;
         let orbs = []; 
         let enemies = []; 
+        let particles = []; // Particle system pool
         const hands = [null, null]; 
         
         // --- Holographic HUD Globals ---
@@ -157,7 +158,7 @@
             { type: 'cross', color: 0xaa00ff }     // Purple
         ];
 
-        // --- $1 Recognizer Implementation (Compact) ---
+        // --- $1 Recognizer Implementation ---
         class Point { constructor(x, y) { this.x = x; this.y = y; } }
         class GestureRecognizer {
             constructor() {
@@ -253,14 +254,9 @@
             }
             setupTemplates() {
                 const addT = (name, pts) => this.Templates.push({Name: name, Points: this.Normalize(pts)});
-                
-                // Line
                 addT('line', [new Point(0,0), new Point(100,0)]);
-                // Triangle
                 addT('triangle', [new Point(50,10), new Point(10,90), new Point(90,90), new Point(50,10)]);
-                // Cross
                 addT('cross', [new Point(50,10), new Point(50,90), new Point(50,50), new Point(10,50), new Point(90,50)]);
-                // X
                 addT('x', [new Point(10,10), new Point(90,90), new Point(90,10), new Point(10,90)]);
             }
             Recognize(points) {
@@ -282,14 +278,11 @@
         init();
         renderer.setAnimationLoop(animate);
 
-        // Hide Wave 1 text after 3 seconds
         setTimeout(() => { document.getElementById('wave-announce').style.opacity = 0; }, 3000);
 
         function init() {
             scene = new THREE.Scene();
-            // Darker background for the neon to pop
             scene.background = new THREE.Color(0x020408);
-            // Push fog further back to reveal the cityscape
             scene.fog = new THREE.Fog(0x020408, 5, 35); 
 
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
@@ -302,7 +295,6 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // --- Environment Setup (The Grid) ---
             buildSimulationEnvironment();
 
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
@@ -312,7 +304,6 @@
             pointLight.position.set(0, 1.2, 0);
             scene.add(pointLight);
 
-            // --- Heart Stone & Health UI ---
             const stoneGeo = new THREE.IcosahedronGeometry(0.3, 1);
             const stoneMat = new THREE.MeshStandardMaterial({
                 color: 0x00ffff, emissive: 0x008888, wireframe: true, transparent: true, opacity: 0.8
@@ -325,11 +316,9 @@
             const ringMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
             healthRing = new THREE.Mesh(ringGeo, ringMat);
             healthRing.rotation.x = Math.PI / 2;
-            // Move ring slightly up so it doesn't clip into the new pedestal
             healthRing.position.y = -0.25; 
             heartStone.add(healthRing); 
 
-            // --- Trail Setup ---
             trailGeo = new THREE.BufferGeometry();
             trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
             trailGeo.setDrawRange(0, 0);
@@ -337,7 +326,6 @@
             trailLine = new THREE.Line(trailGeo, trailMat);
             scene.add(trailLine);
 
-            // --- Lock-on Reticles Pool ---
             for (let i = 0; i < MAX_HELD_ORBS; i++) {
                 const rGeo = new THREE.RingGeometry(0.18, 0.22, 16);
                 const rMat = new THREE.MeshBasicMaterial({color: 0x00aaff, side: THREE.DoubleSide, transparent: true, opacity: 0.7});
@@ -347,7 +335,6 @@
                 lockReticles.push(reticle);
             }
 
-            // --- Holographic Tactical HUD Setup ---
             hudCanvas = document.createElement('canvas');
             hudCanvas.width = 512;
             hudCanvas.height = 512;
@@ -367,60 +354,92 @@
         }
 
         function buildSimulationEnvironment() {
-            // 1. Solid Floor
             const floorGeo = new THREE.PlaneGeometry(100, 100);
             const floorMat = new THREE.MeshStandardMaterial({ color: 0x050811, roughness: 0.9, metalness: 0.2 });
             const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // 2. Main TRON Grid
             const grid = new THREE.GridHelper(100, 100, 0x00aaff, 0x002244);
-            grid.position.y = 0.01; // Slightly above floor to prevent Z-fighting
+            grid.position.y = 0.01; 
             scene.add(grid);
 
-            // 3. Central Pedestal for Heart Stone
             const pedGeo = new THREE.CylinderGeometry(0.8, 1.0, 0.5, 6);
             const pedMat = new THREE.MeshStandardMaterial({ color: 0x0a101a, metalness: 0.8, roughness: 0.3 });
             const pedestal = new THREE.Mesh(pedGeo, pedMat);
             pedestal.position.set(0, 0.25, -0.5); 
             scene.add(pedestal);
 
-            // Pedestal Wireframe Overlay
             const pedEdges = new THREE.EdgesGeometry(pedGeo);
             const pedLine = new THREE.LineSegments(pedEdges, new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 }));
             pedestal.add(pedLine);
 
-            // 4. Procedural Cityscape / Data Towers
             const cityGroup = new THREE.Group();
             const numTowers = 45;
-            
             for(let i=0; i<numTowers; i++) {
-                // Randomize dimensions
                 const h = 2 + Math.random() * 15;
                 const w = 1 + Math.random() * 4;
                 const d = 1 + Math.random() * 4;
-                
                 const bGeo = new THREE.BoxGeometry(w, h, d);
                 const bMat = new THREE.MeshStandardMaterial({ color: 0x020408, metalness: 0.9, roughness: 0.1 });
                 const bMesh = new THREE.Mesh(bGeo, bMat);
-
-                // Position in a ring outside the combat zone (12m to 30m away)
                 const angle = Math.random() * Math.PI * 2;
                 const radius = 12 + Math.random() * 18; 
                 bMesh.position.set(Math.cos(angle) * radius, h/2, Math.sin(angle) * radius);
-
-                // Neon Edges
                 const edges = new THREE.EdgesGeometry(bGeo);
-                // Randomize edge colors between Cyan and Purple to match spells
                 const edgeColor = Math.random() > 0.5 ? 0x00aaff : 0xaa00ff;
                 const lineMat = new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.4 });
                 const line = new THREE.LineSegments(edges, lineMat);
                 bMesh.add(line);
-
                 cityGroup.add(bMesh);
             }
             scene.add(cityGroup);
+        }
+
+        // --- Visual Effects System ---
+        function spawnParticleExplosion(position, color, count = 12) {
+            for (let i = 0; i < count; i++) {
+                const geo = new THREE.IcosahedronGeometry(0.02 + Math.random() * 0.04, 0);
+                const mat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 1.0 });
+                const p = new THREE.Mesh(geo, mat);
+                p.position.copy(position);
+                
+                p.userData = {
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 0.1,
+                        (Math.random() - 0.5) * 0.1,
+                        (Math.random() - 0.5) * 0.1
+                    ),
+                    life: 1.0
+                };
+                scene.add(p);
+                particles.push(p);
+            }
+        }
+
+        function createMuzzleFlash(position, color, scale = 1.0) {
+            const geo = new THREE.SphereGeometry(0.05, 8, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
+            const flash = new THREE.Mesh(geo, mat);
+            flash.position.copy(position);
+            flash.scale.set(0.1, 0.1, 0.1);
+            scene.add(flash);
+
+            const start = Date.now();
+            const duration = 200;
+            const animateFlash = () => {
+                const elapsed = Date.now() - start;
+                const progress = elapsed / duration;
+                if (progress < 1.0) {
+                    const s = 0.1 + progress * 5 * scale;
+                    flash.scale.set(s, s, s);
+                    flash.material.opacity = 0.8 * (1 - progress);
+                    requestAnimationFrame(animateFlash);
+                } else {
+                    scene.remove(flash);
+                }
+            };
+            animateFlash();
         }
 
         function handleEnemyKill() {
@@ -431,12 +450,10 @@
         function updateStatsUI() {
             const h = (hands[0]?.userData.heldOrbs.length > hands[1]?.userData.heldOrbs.length) ? hands[0] : (hands[1] || hands[0]);
             if (!h) return;
-
             const total = h.userData.heldOrbs.length;
             const b = h.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length;
             const o = h.userData.heldOrbs.filter(o => o.userData.spellType === 'triangle').length;
             const p = h.userData.heldOrbs.filter(o => o.userData.spellType === 'cross').length;
-
             document.getElementById('ui-wave').innerText = `WAVE: ${currentWave}`;
             document.getElementById('ui-cap').innerText = `CAP: ${total}/${MAX_HELD_ORBS}`;
             document.getElementById('ui-b').innerText = `B:${b}`;
@@ -447,81 +464,58 @@
 
         function updateHUDCanvas(timeSeconds, activeHand) {
             hudCtx.clearRect(0, 0, 512, 512);
-            
-            // Background Base
             hudCtx.fillStyle = 'rgba(5, 12, 20, 0.85)';
             hudCtx.fillRect(0, 0, 512, 512);
-            
-            // Tech Borders & Accents
             hudCtx.strokeStyle = '#00ffff';
             hudCtx.lineWidth = 3;
             hudCtx.strokeRect(15, 15, 482, 482);
-
             hudCtx.fillStyle = '#00ffff';
-            // Corner Brackets
-            const cL = 35; // Corner Length
-            const cT = 8;  // Corner Thickness
+            const cL = 35; const cT = 8;
             hudCtx.fillRect(10, 10, cL, cT); hudCtx.fillRect(10, 10, cT, cL);
             hudCtx.fillRect(502 - cL, 10, cL, cT); hudCtx.fillRect(494, 10, cT, cL);
             hudCtx.fillRect(10, 494, cL, cT); hudCtx.fillRect(10, 502 - cL, cT, cL);
             hudCtx.fillRect(502 - cL, 494, cL, cT); hudCtx.fillRect(494, 502 - cL, cT, cL);
-
-            // Header
             hudCtx.font = 'bold 34px Courier New';
             hudCtx.fillStyle = '#00ffff';
             hudCtx.textAlign = 'center';
             hudCtx.fillText('TACTICAL OVERVIEW', 256, 55);
-            
-            // Grid Divider
             hudCtx.beginPath();
             hudCtx.moveTo(30, 75);
             hudCtx.lineTo(482, 75);
             hudCtx.lineWidth = 1;
             hudCtx.stroke();
-
             hudCtx.font = 'bold 24px Courier New';
             hudCtx.textAlign = 'left';
-            
-            // Telemetry
             hudCtx.fillStyle = '#ffffff';
             const mins = Math.floor(timeSeconds / 60);
             const secs = Math.floor(timeSeconds % 60).toString().padStart(2, '0');
             hudCtx.fillText(`SYS. UPTIME  : ${mins}:${secs}`, 40, 115);
             hudCtx.fillText(`THREAT LEVEL : WAVE ${currentWave}`, 40, 155);
             hudCtx.fillText(`TARGETS KIA  : ${enemiesKilled}`, 40, 195);
-
             hudCtx.beginPath();
             hudCtx.moveTo(30, 215);
             hudCtx.lineTo(482, 215);
             hudCtx.stroke();
-
-            // Ammunition Status
             const b = activeHand?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
             const o = activeHand?.userData.heldOrbs.filter(o => o.userData.spellType === 'triangle').length || 0;
             const p = activeHand?.userData.heldOrbs.filter(o => o.userData.spellType === 'cross').length || 0;
             const total = activeHand?.userData.heldOrbs.length || 0;
-
             hudCtx.fillStyle = '#aaaaaa';
             hudCtx.fillText(`MAGAZINE STATUS [${total}/${MAX_HELD_ORBS}]`, 40, 255);
-            
             hudCtx.font = '22px Courier New';
             hudCtx.fillStyle = '#00aaff'; hudCtx.fillText(`[BLUE]   LINE : ${b}`, 50, 295);
             hudCtx.fillStyle = '#ffaa00'; hudCtx.fillText(`[ORANGE] TRI  : ${o}`, 50, 325);
             hudCtx.fillStyle = '#aa00ff'; hudCtx.fillText(`[PURPLE] CRS  : ${p}`, 50, 355);
-
             hudCtx.beginPath();
             hudCtx.moveTo(30, 375);
             hudCtx.lineTo(482, 375);
             hudCtx.stroke();
-
-            // Sigil Legend
             hudCtx.fillStyle = '#ffffff';
             hudCtx.fillText(`COMBAT PROTOCOLS:`, 40, 410);
             hudCtx.font = '18px Courier New';
             hudCtx.fillStyle = '#00aaff'; hudCtx.fillText(`> LINE : Beam / Unibeam (5 Blue)`, 50, 440);
             hudCtx.fillStyle = '#ffaa00'; hudCtx.fillText(`> TRI  : Kinetic Repulse`, 50, 465);
             hudCtx.fillStyle = '#aa00ff'; hudCtx.fillText(`> CRS/X: Tracking Swarm`, 50, 490);
-
             hudTexture.needsUpdate = true;
         }
 
@@ -529,16 +523,12 @@
             heartHealth -= amount;
             heartStone.material.emissive.setHex(0xff0000);
             setTimeout(() => { heartStone.material.emissive.setHex(0x008888); }, 200);
-
             const scale = Math.max(0.1, heartHealth / 100);
             healthRing.scale.set(scale, scale, scale);
-
             if (heartHealth > 50) healthRing.material.color.setHex(0x00ff00);
             else if (heartHealth > 20) healthRing.material.color.setHex(0xffff00);
             else healthRing.material.color.setHex(0xff0000);
-
             if (heartHealth <= 0) {
-                // GAME OVER - Reset to Wave 1 Defaults
                 heartHealth = 100;
                 enemiesKilled = 0;
                 currentWave = 1;
@@ -546,16 +536,13 @@
                 enemiesSpawnedThisWave = 0;
                 waveState = 'spawning';
                 enemySpawnTimer = 0;
-                
                 const ann = document.getElementById('wave-announce');
                 ann.innerText = "SYSTEM REBOOT - WAVE 1";
                 ann.style.opacity = 1;
                 setTimeout(() => { ann.style.opacity = 0; }, 3000);
-
                 healthRing.scale.set(1, 1, 1);
                 healthRing.material.color.setHex(0x00ff00);
-                
-                orbs.forEach(orb => scene.remove(orb)); // Note orb is now a Group
+                orbs.forEach(orb => scene.remove(orb)); 
                 orbs = [];
                 enemies.forEach(enemy => scene.remove(enemy));
                 enemies = [];
@@ -564,19 +551,13 @@
             }
         }
 
-        function damageEnemy(enemy, amount) {
+        function damageEnemy(enemy, amount, killColor = 0xff0000) {
             enemy.userData.hp -= amount;
-            
-            // Hit Flash
             const originalEmissive = enemy.material.emissive.getHex();
             enemy.material.emissive.setHex(0xffffff);
-            setTimeout(() => {
-                if (enemies.includes(enemy)) {
-                    enemy.material.emissive.setHex(originalEmissive);
-                }
-            }, 100);
-
+            setTimeout(() => { if (enemies.includes(enemy)) enemy.material.emissive.setHex(originalEmissive); }, 100);
             if (enemy.userData.hp <= 0) {
+                spawnParticleExplosion(enemy.position, killColor, 20);
                 scene.remove(enemy);
                 const index = enemies.indexOf(enemy);
                 if(index > -1) enemies.splice(index, 1);
@@ -586,61 +567,37 @@
 
         function createOrb(position) {
             const typeInfo = SPELL_TYPES[Math.floor(Math.random() * SPELL_TYPES.length)];
-            
-            // Container for shell and inner mesh
             const orbGroup = new THREE.Group();
             orbGroup.position.copy(position);
-
-            // Transparent Shell
             const shellGeo = new THREE.SphereGeometry(0.06, 16, 16);
             const shellMat = new THREE.MeshStandardMaterial({
-                color: typeInfo.color, 
-                transparent: true, 
-                opacity: 0.3, 
-                roughness: 0.1, 
-                metalness: 0.8 
+                color: typeInfo.color, transparent: true, opacity: 0.3, roughness: 0.1, metalness: 0.8 
             });
             const shell = new THREE.Mesh(shellGeo, shellMat);
             orbGroup.add(shell);
-
-            // Inner Symbolic Mesh
             const innerMat = new THREE.MeshStandardMaterial({
-                color: typeInfo.color,
-                emissive: typeInfo.color,
-                emissiveIntensity: 2.0,
-                roughness: 0.5
+                color: typeInfo.color, emissive: typeInfo.color, emissiveIntensity: 2.0, roughness: 0.5
             });
-
             let innerMesh;
             if (typeInfo.type === 'line') {
-                // Vertical Line
                 const geo = new THREE.CylinderGeometry(0.01, 0.01, 0.08, 8);
                 innerMesh = new THREE.Mesh(geo, innerMat);
             } else if (typeInfo.type === 'triangle') {
-                // 3D Triangle (Flat Cylinder with 3 segments)
                 const geo = new THREE.CylinderGeometry(0.04, 0.04, 0.015, 3);
                 innerMesh = new THREE.Mesh(geo, innerMat);
-                innerMesh.rotation.x = Math.PI / 2; // Face it outwards initially
+                innerMesh.rotation.x = Math.PI / 2;
             } else if (typeInfo.type === 'cross') {
-                // 3D Cross
                 innerMesh = new THREE.Group();
                 const geo = new THREE.CylinderGeometry(0.01, 0.01, 0.08, 8);
                 const bar1 = new THREE.Mesh(geo, innerMat);
                 const bar2 = new THREE.Mesh(geo, innerMat);
                 bar2.rotation.z = Math.PI / 2;
-                innerMesh.add(bar1);
-                innerMesh.add(bar2);
+                innerMesh.add(bar1); innerMesh.add(bar2);
             }
-
             orbGroup.add(innerMesh);
-
             orbGroup.userData = { 
-                baseY: position.y, 
-                phase: Math.random() * Math.PI * 2, 
-                heldBy: null, 
-                state: 'idle',
-                spellType: typeInfo.type,
-                innerSymbol: innerMesh // Reference to animate it later
+                baseY: position.y, phase: Math.random() * Math.PI * 2, heldBy: null, state: 'idle',
+                spellType: typeInfo.type, innerSymbol: innerMesh 
             };
             scene.add(orbGroup);
             orbs.push(orbGroup);
@@ -648,21 +605,13 @@
 
         function createEnemy(position, type, waveLevel) {
             let scale, hp, speed, color, emissive;
-
             if (type === 'brute') {
-                scale = 1.8;
-                hp = 3;
-                color = 0x880000;
-                emissive = 0x550000;
+                scale = 1.8; hp = 3; color = 0x880000; emissive = 0x550000;
                 speed = 0.15 + (waveLevel * 0.02); 
             } else { 
-                scale = 1.0;
-                hp = 1;
-                color = 0xff0000;
-                emissive = 0xaa0000;
+                scale = 1.0; hp = 1; color = 0xff0000; emissive = 0xaa0000;
                 speed = 0.30 + (waveLevel * 0.05); 
             }
-
             const geo = new THREE.IcosahedronGeometry(0.12 * scale, 0);
             const mat = new THREE.MeshStandardMaterial({
                 color: color, emissive: emissive, emissiveIntensity: 0.4, roughness: 0.6, flatShading: true
@@ -670,25 +619,22 @@
             const enemy = new THREE.Mesh(geo, mat);
             enemy.position.copy(position);
             enemy.userData = { 
-                type: type,
-                hp: hp,
-                baseSpeed: speed,
-                phase: Math.random() * Math.PI * 2, 
-                state: 'homing', 
-                velocity: new THREE.Vector3() 
+                type: type, hp: hp, baseSpeed: speed, phase: Math.random() * Math.PI * 2, 
+                state: 'homing', velocity: new THREE.Vector3() 
             };
             scene.add(enemy);
             enemies.push(enemy);
+
+            // Spawning visual flash
+            createMuzzleFlash(position, 0xffaa00, 2.0);
         }
 
         function setupHand(index) {
             const hand = renderer.xr.getHand(index);
             scene.add(hand);
-
             hand.userData.jointMeshes = {};
             hand.userData.heldOrbs = []; 
             hand.userData.handedness = index === 0 ? 'left' : 'right';
-
             const gauntletGeo = new THREE.CylinderGeometry(0.04, 0.045, 0.12, 8);
             gauntletGeo.rotateX(Math.PI / 2); 
             const gauntletMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.3 });
@@ -696,21 +642,17 @@
             gauntlet.visible = false; 
             scene.add(gauntlet);
             hand.userData.gauntletMesh = gauntlet;
-
             hand.addEventListener('connected', (event) => { hand.userData.xrInputSource = event.data; });
             hands[index] = hand;
         }
 
         function applyEMA(jointName, currentPos) {
-            if (!smoothedJoints.has(jointName)) {
-                smoothedJoints.set(jointName, currentPos.clone());
-                return currentPos.clone();
-            }
+            if (!smoothedJoints.has(jointName)) { smoothedJoints.set(jointName, currentPos.clone()); return currentPos.clone(); }
             const previousPos = smoothedJoints.get(jointName);
             const smoothed = new THREE.Vector3(
                 (currentPos.x * EMA_ALPHA) + (previousPos.x * (1 - EMA_ALPHA)),
-                (currentPos.y * EMA_ALPHA) + (currentPos.y * (1 - EMA_ALPHA)),
-                (currentPos.z * EMA_ALPHA) + (currentPos.z * (1 - EMA_ALPHA))
+                (currentPos.y * EMA_ALPHA) + (previousPos.y * (1 - EMA_ALPHA)),
+                (currentPos.z * EMA_ALPHA) + (previousPos.z * (1 - EMA_ALPHA))
             );
             smoothedJoints.set(jointName, smoothed);
             return smoothed;
@@ -733,35 +675,28 @@
 
         function isShaka(hand) {
             if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['pinky-finger-tip'] || !hand.joints['index-finger-tip'] || !hand.joints['wrist']) return false;
-            
             const thumbTip = hand.joints['thumb-tip'].position;
             const pinkyTip = hand.joints['pinky-finger-tip'].position;
             const indexTip = hand.joints['index-finger-tip'].position;
             const wrist = hand.joints['wrist'].position;
-
             const spread = thumbTip.distanceTo(pinkyTip);
             const indexCurl = indexTip.distanceTo(wrist);
-
             return spread > 0.12 && indexCurl < 0.09; 
         }
 
         function updateTargeting() {
             lockedEnemies = [];
-            
             const blueL = hands[0]?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
             const blueR = hands[1]?.userData.heldOrbs.filter(o => o.userData.spellType === 'line').length || 0;
             const currentCharge = Math.max(blueL, blueR);
-
             if (currentCharge > 0 && currentCharge < MAX_HELD_ORBS && enemies.length > 0) {
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 const candidates = [];
-
                 enemies.forEach(enemy => {
                     const dirToEnemy = new THREE.Vector3().subVectors(enemy.position, camera.position).normalize();
                     const dot = forward.dot(dirToEnemy);
                     if (dot > 0.5) candidates.push({ enemy, dot }); 
                 });
-
                 candidates.sort((a, b) => b.dot - a.dot);
                 for (let i = 0; i < Math.min(currentCharge, candidates.length); i++) {
                     lockedEnemies.push(candidates[i].enemy);
@@ -769,142 +704,101 @@
             } else if (currentCharge === MAX_HELD_ORBS) {
                 lockedEnemies = [];
             }
-
             for (let i = 0; i < lockReticles.length; i++) {
                 if (i < lockedEnemies.length) {
-                    lockReticles[i].visible = true;
-                    lockReticles[i].position.copy(lockedEnemies[i].position);
-                    lockReticles[i].lookAt(camera.position);
-                    lockReticles[i].rotation.z += 0.05; 
-                } else {
-                    lockReticles[i].visible = false;
-                }
+                    lockReticles[i].visible = true; lockReticles[i].position.copy(lockedEnemies[i].position);
+                    lockReticles[i].lookAt(camera.position); lockReticles[i].rotation.z += 0.05; 
+                } else { lockReticles[i].visible = false; }
             }
         }
 
         function fireSpell(type, origin, powerLevel) {
+            // Weapon firing feedback
+            createMuzzleFlash(origin, (type === 'line' ? 0x00ffff : (type === 'triangle' ? 0xffaa00 : 0xaa00ff)), 1.5 * (powerLevel/3));
+
             if (type === 'line') {
                 if (powerLevel === MAX_HELD_ORBS) {
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
                     const BEAM_LENGTH = 40;
-                    
                     const startPos = origin.clone().add(forward.multiplyScalar(0.6));
-                    
                     const geo = new THREE.CylinderGeometry(0.5, 0.5, BEAM_LENGTH, 16);
-                    geo.translate(0, BEAM_LENGTH/2, 0); 
-                    geo.rotateX(-Math.PI / 2); 
+                    geo.translate(0, BEAM_LENGTH/2, 0); geo.rotateX(-Math.PI / 2); 
                     const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending});
                     const mesh = new THREE.Mesh(geo, mat);
-                    mesh.position.copy(startPos);
-                    mesh.quaternion.copy(camera.quaternion); 
+                    mesh.position.copy(startPos); mesh.quaternion.copy(camera.quaternion); 
                     scene.add(mesh);
-
                     const endPoint = startPos.clone().add(forward.multiplyScalar(BEAM_LENGTH));
                     const rayLine = new THREE.Line3(startPos, endPoint);
                     const closestPoint = new THREE.Vector3();
-
                     for(let i = enemies.length - 1; i >= 0; i--) {
                         const enemy = enemies[i];
                         rayLine.closestPointToPoint(enemy.position, true, closestPoint);
-                        if (closestPoint.distanceTo(enemy.position) <= 0.6) { 
-                            damageEnemy(enemy, 5); 
-                        }
+                        if (closestPoint.distanceTo(enemy.position) <= 0.6) { damageEnemy(enemy, 5, 0x00ffff); }
                     }
-
                     let ticks = 0;
                     const fadeInt = setInterval(() => {
-                        ticks++;
-                        mesh.scale.x *= 0.95;
-                        mesh.scale.z *= 0.95;
-                        mat.opacity -= 0.02; 
-                        if (ticks >= 50) { 
-                            clearInterval(fadeInt);
-                            scene.remove(mesh);
-                        }
+                        ticks++; mesh.scale.x *= 0.95; mesh.scale.z *= 0.95; mat.opacity -= 0.02; 
+                        if (ticks >= 50) { clearInterval(fadeInt); scene.remove(mesh); }
                     }, 30);
-                    
                 } else if (lockedEnemies.length > 0) {
                     lockedEnemies.forEach(targetEnemy => {
-                        const start = origin.clone();
-                        const end = targetEnemy.position.clone();
-                        const distance = start.distanceTo(end);
-                        const mid = start.clone().lerp(end, 0.5);
-
+                        const start = origin.clone(); const end = targetEnemy.position.clone();
+                        const distance = start.distanceTo(end); const mid = start.clone().lerp(end, 0.5);
                         const geo = new THREE.CylinderGeometry(0.015, 0.015, distance);
                         geo.rotateX(Math.PI / 2); 
                         const mat = new THREE.MeshBasicMaterial({color: 0x00aaff, transparent: true, opacity: 0.9});
                         const mesh = new THREE.Mesh(geo, mat);
-                        
-                        mesh.position.copy(mid);
-                        mesh.lookAt(end); 
+                        mesh.position.copy(mid); mesh.lookAt(end); 
                         scene.add(mesh);
-
-                        damageEnemy(targetEnemy, 1);
+                        damageEnemy(targetEnemy, 1, 0x00aaff);
                         setTimeout(() => scene.remove(mesh), 200);
                     });
                 }
-
             } else if (type === 'triangle') {
                 const REPULSE_RADIUS = 3.0 + (powerLevel * 1.5); 
                 const PUSH_FORCE = 8.0 * powerLevel; 
-                
                 const geo = new THREE.IcosahedronGeometry(0.1, 1);
                 const mat = new THREE.MeshBasicMaterial({color: 0xffaa00, wireframe: true, transparent: true, opacity: 0.8});
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.copy(origin);
                 scene.add(mesh);
-                
                 const expInt = setInterval(() => {
-                    mesh.scale.multiplyScalar(1.3 + (powerLevel * 0.1));
-                    mat.opacity -= 0.08;
+                    mesh.scale.multiplyScalar(1.3 + (powerLevel * 0.1)); mat.opacity -= 0.08;
                     if(mat.opacity <= 0) { clearInterval(expInt); scene.remove(mesh); }
                 }, 30);
-
                 enemies.forEach(enemy => {
                     if (enemy.position.distanceTo(origin) < REPULSE_RADIUS) {
                         enemy.userData.state = 'repulsed';
                         const pushDir = new THREE.Vector3().subVectors(enemy.position, origin).normalize();
-                        
                         const massFactor = enemy.userData.type === 'brute' ? 0.4 : 1.0;
                         enemy.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE * massFactor)); 
                     }
                 });
             } else if (type === 'cross' || type === 'x') {
-                // CROSS BARRAGE - Tracking Swarm
                 const numBeams = 4 * powerLevel;
                 const sortedEnemies = [...enemies].sort((a, b) => a.position.distanceTo(origin) - b.position.distanceTo(origin));
-
                 if (sortedEnemies.length > 0) {
                     for (let i = 0; i < numBeams; i++) {
                         const targetEnemy = sortedEnemies[i % sortedEnemies.length]; 
-                        
-                        const start = origin.clone();
-                        const end = targetEnemy.position.clone();
-                        const distance = start.distanceTo(end);
-                        const mid = start.clone().lerp(end, 0.5);
-
+                        const start = origin.clone(); const end = targetEnemy.position.clone();
+                        const distance = start.distanceTo(end); const mid = start.clone().lerp(end, 0.5);
                         const beamThickness = 0.015;
                         const geo = new THREE.CylinderGeometry(beamThickness, beamThickness, distance);
                         geo.rotateX(Math.PI / 2); 
                         const mat = new THREE.MeshBasicMaterial({color: 0xaa00ff, transparent: true, opacity: 0.9});
                         const mesh = new THREE.Mesh(geo, mat);
-                        
-                        mesh.position.copy(mid);
-                        mesh.lookAt(end); 
+                        mesh.position.copy(mid); mesh.lookAt(end); 
                         scene.add(mesh);
-
-                        damageEnemy(targetEnemy, 1);
+                        damageEnemy(targetEnemy, 1, 0xaa00ff);
                         setTimeout(() => scene.remove(mesh), 200 + (powerLevel * 50));
                     }
                 } else {
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
                     const geo = new THREE.CylinderGeometry(0.01 * powerLevel, 0.01 * powerLevel, 10);
-                    geo.translate(0, 5, 0); 
-                    geo.rotateX(-Math.PI / 2); 
+                    geo.translate(0, 5, 0); geo.rotateX(-Math.PI / 2); 
                     const mat = new THREE.MeshBasicMaterial({color: 0xaa00ff, transparent: true, opacity: 0.8});
                     const mesh = new THREE.Mesh(geo, mat);
-                    mesh.position.copy(origin);
-                    mesh.quaternion.copy(camera.quaternion);
+                    mesh.position.copy(origin); mesh.quaternion.copy(camera.quaternion);
                     scene.add(mesh);
                     setTimeout(() => scene.remove(mesh), 300);
                 }
@@ -913,36 +807,27 @@
 
         function processGesture() {
             if (drawPoints3D.length < 10) return;
-
             const points2D = drawPoints3D.map(pt3d => {
                 const vec = pt3d.clone().project(camera);
                 return new Point((vec.x + 1) * 500, (1 - vec.y) * 500); 
             });
-
             const result = recognizer.Recognize(points2D);
-            console.log("Casted: ", result.Name, "Score: ", result.Score);
-
             const finalSpell = (result.Name === 'x') ? 'cross' : result.Name;
-
             if (finalSpell !== 'none') {
                 const activeHand = hands[activeCastingHand === 'left' ? 0 : 1];
-                
                 if (activeHand && activeHand.userData.heldOrbs.length > 0) {
                     const matchingOrbs = activeHand.userData.heldOrbs.filter(o => o.userData.spellType === finalSpell);
-
                     if (matchingOrbs.length > 0) {
                         const origin = activeHand.joints['wrist'].position.clone();
                         const powerLevel = matchingOrbs.length;
-                        
                         matchingOrbs.forEach(orb => {
+                            spawnParticleExplosion(orb.position, orb.userData.spellType === 'line' ? 0x00aaff : (orb.userData.spellType === 'triangle' ? 0xffaa00 : 0xaa00ff), 10);
                             scene.remove(orb);
                             const index = orbs.indexOf(orb);
                             if(index > -1) orbs.splice(index, 1);
                         });
-                        
                         activeHand.userData.heldOrbs = activeHand.userData.heldOrbs.filter(o => o.userData.spellType !== finalSpell);
                         updateStatsUI();
-                        
                         fireSpell(finalSpell, origin, powerLevel);
                     }
                 }
@@ -951,28 +836,20 @@
 
         function updateHands(timeDelta, timeSeconds) {
             let activeShakaHand = null;
-
             hands.forEach(hand => {
                 if (!hand || !hand.joints) return;
-
                 const wristSpace = hand.joints['wrist'];
                 if (!wristSpace || !wristSpace.position) return; 
-
-                if (isShaka(hand)) {
-                    activeShakaHand = hand;
-                }
-
+                if (isShaka(hand)) activeShakaHand = hand;
                 if (hand.userData.gauntletMesh) {
                     hand.userData.gauntletMesh.visible = true;
                     const offset = new THREE.Vector3(0, 0, 0.05).applyQuaternion(wristSpace.quaternion);
                     hand.userData.gauntletMesh.position.copy(wristSpace.position).add(offset);
                     hand.userData.gauntletMesh.quaternion.copy(wristSpace.quaternion);
                 }
-
                 Object.keys(hand.joints).forEach(jointName => {
                     const joint = hand.joints[jointName];
                     if (!joint.position) return;
-
                     if (!hand.userData.jointMeshes[jointName]) {
                         const geo = new THREE.SphereGeometry(jointName.includes('tip') ? 0.012 : 0.008, 8, 8);
                         const mat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.3 });
@@ -980,60 +857,42 @@
                         scene.add(mesh);
                         hand.userData.jointMeshes[jointName] = mesh;
                     }
-
                     const mesh = hand.userData.jointMeshes[jointName];
                     const uniqueJointId = `${hand.userData.handedness}_${jointName}`;
                     const smoothedPos = applyEMA(uniqueJointId, joint.position);
-                    mesh.position.copy(smoothedPos);
-                    mesh.quaternion.copy(joint.quaternion);
+                    mesh.position.copy(smoothedPos); mesh.quaternion.copy(joint.quaternion);
                 });
-
-                const isOp = isHandOpen(hand);
-                const isClosed = isHandClosed(hand);
-                const pinching = isPinching(hand);
-                const wristPos = hand.joints['wrist'].position;
-
+                const isOp = isHandOpen(hand); const isClosed = isHandClosed(hand);
+                const pinching = isPinching(hand); const wristPos = hand.joints['wrist'].position;
                 if (hand.userData.heldOrbs.length > 0 && isClosed && !isDrawing) {
                     hand.userData.heldOrbs.forEach(orb => {
-                        orb.userData.heldBy = null; 
-                        orb.userData.state = 'idle';
-                        orb.userData.baseY = orb.position.y;
-                        orb.scale.set(1, 1, 1); 
+                        orb.userData.heldBy = null; orb.userData.state = 'idle';
+                        orb.userData.baseY = orb.position.y; orb.scale.set(1, 1, 1); 
                     });
-                    hand.userData.heldOrbs = [];
-                    updateStatsUI();
+                    hand.userData.heldOrbs = []; updateStatsUI();
                 }
-
                 if (hand.userData.heldOrbs.length < MAX_HELD_ORBS && isOp && !activeShakaHand) {
                     for (let i = 0; i < orbs.length; i++) {
                         const orb = orbs[i];
                         if (orb.userData.state === 'held') continue; 
-                        
                         if (wristPos.distanceTo(orb.position) < CATCH_RADIUS) {
-                            orb.userData.heldBy = hand.userData.handedness;
-                            orb.userData.state = 'held';
-                            hand.userData.heldOrbs.push(orb);
-                            updateStatsUI();
+                            orb.userData.heldBy = hand.userData.handedness; orb.userData.state = 'held';
+                            hand.userData.heldOrbs.push(orb); updateStatsUI();
+                            spawnParticleExplosion(orb.position, 0xffffff, 5);
                             break; 
                         }
                     }
                 }
-
                 if (hand.userData.heldOrbs.length > 0) {
                     if (pinching) {
                         if (!isDrawing) {
-                            isDrawing = true;
-                            currentTrailCount = 0;
-                            drawPoints3D = [];
+                            isDrawing = true; currentTrailCount = 0; drawPoints3D = [];
                             activeCastingHand = hand.userData.handedness;
                         }
-                        
                         if (currentTrailCount < MAX_TRAIL_POINTS && activeCastingHand === hand.userData.handedness) {
                             const pinchPoint = new THREE.Vector3().addVectors(
-                                hand.joints['thumb-tip'].position, 
-                                hand.joints['index-finger-tip'].position
+                                hand.joints['thumb-tip'].position, hand.joints['index-finger-tip'].position
                             ).multiplyScalar(0.5);
-
                             drawPoints3D.push(pinchPoint.clone());
                             trailPositions[currentTrailCount * 3] = pinchPoint.x;
                             trailPositions[currentTrailCount * 3 + 1] = pinchPoint.y;
@@ -1043,26 +902,16 @@
                             trailGeo.attributes.position.needsUpdate = true;
                         }
                     } else if (isDrawing && activeCastingHand === hand.userData.handedness) {
-                        isDrawing = false;
-                        processGesture();
-                        trailGeo.setDrawRange(0, 0); 
-                        currentTrailCount = 0;
+                        isDrawing = false; processGesture(); trailGeo.setDrawRange(0, 0); currentTrailCount = 0;
                     }
                 }
             });
-
             if (activeShakaHand && activeShakaHand.joints['wrist']) {
-                hudMesh.visible = true;
-                const wristPos = activeShakaHand.joints['wrist'].position;
-                
+                hudMesh.visible = true; const wristPos = activeShakaHand.joints['wrist'].position;
                 const offset = new THREE.Vector3(0, 0.25, -0.1).applyQuaternion(activeShakaHand.joints['wrist'].quaternion);
-                hudMesh.position.copy(wristPos).add(offset);
-                hudMesh.lookAt(camera.position);
-                
+                hudMesh.position.copy(wristPos).add(offset); hudMesh.lookAt(camera.position);
                 updateHUDCanvas(timeSeconds, activeShakaHand);
-            } else {
-                hudMesh.visible = false;
-            }
+            } else { hudMesh.visible = false; }
         }
 
         function updateEntities(timeDelta, timeSeconds) {
@@ -1070,42 +919,28 @@
                 enemySpawnTimer -= timeDelta;
                 if (enemySpawnTimer <= 0 && enemiesSpawnedThisWave < enemiesTotalThisWave) {
                     enemySpawnTimer = Math.max(0.6, baseEnemySpawnRate - (currentWave * 0.4)); 
-                    
                     const angle = Math.PI + (Math.random() * Math.PI); 
                     const radius = 6 + (Math.random() * 2); 
                     const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
-                    
                     let type = 'drone';
-                    if (currentWave >= 3 && Math.random() < 0.05 + (currentWave * 0.05)) {
-                        type = 'brute';
-                    }
-
+                    if (currentWave >= 3 && Math.random() < 0.05 + (currentWave * 0.05)) { type = 'brute'; }
                     createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius), type, currentWave);
                     enemiesSpawnedThisWave++;
                 }
-
                 if (enemiesSpawnedThisWave >= enemiesTotalThisWave && enemies.length === 0) {
-                    waveState = 'intermission';
-                    intermissionTimer = 5.0; 
-                    const ann = document.getElementById('wave-announce');
-                    ann.innerText = "WAVE CLEAR";
-                    ann.style.opacity = 1;
+                    waveState = 'intermission'; intermissionTimer = 5.0; 
+                    const ann = document.getElementById('wave-announce'); ann.innerText = "WAVE CLEAR"; ann.style.opacity = 1;
                 }
             } else if (waveState === 'intermission') {
                 intermissionTimer -= timeDelta;
                 if (intermissionTimer <= 0) {
-                    currentWave++;
-                    enemiesTotalThisWave = 10 * currentWave; 
-                    enemiesSpawnedThisWave = 0;
+                    currentWave++; enemiesTotalThisWave = 10 * currentWave; enemiesSpawnedThisWave = 0;
                     waveState = 'spawning';
-                    
-                    const ann = document.getElementById('wave-announce');
-                    ann.innerText = `WAVE ${currentWave}`;
+                    const ann = document.getElementById('wave-announce'); ann.innerText = `WAVE ${currentWave}`;
                     setTimeout(() => { ann.style.opacity = 0; }, 2000);
                     updateStatsUI();
                 }
             }
-
             orbSpawnTimer -= timeDelta;
             if (orbSpawnTimer <= 0 && orbs.length < 10) { 
                 orbSpawnTimer = ORB_SPAWN_RATE;
@@ -1113,48 +948,34 @@
                 const radius = 0.3 + Math.random() * 0.2; 
                 const yPos = 1.0 + Math.random() * 0.4; 
                 createOrb(new THREE.Vector3(
-                    camera.position.x + Math.cos(angle) * radius, 
-                    yPos, 
-                    camera.position.z + Math.sin(angle) * radius
+                    camera.position.x + Math.cos(angle) * radius, yPos, camera.position.z + Math.sin(angle) * radius
                 ));
             }
-
             const heartPos = heartStone.position;
-
             for (let i = enemies.length - 1; i >= 0; i--) {
                 let enemy = enemies[i];
-
                 if (enemy.userData.state === 'homing') {
                     const moveDir = new THREE.Vector3().subVectors(heartPos, enemy.position).normalize();
                     enemy.position.add(moveDir.multiplyScalar(enemy.userData.baseSpeed * timeDelta));
                     enemy.position.y += Math.sin(timeSeconds * 4 + enemy.userData.phase) * 0.003;
-                    
-                    enemy.rotation.x += 0.02;
-                    enemy.rotation.y += 0.03;
-
+                    enemy.rotation.x += 0.02; enemy.rotation.y += 0.03;
                     const hitRadius = enemy.userData.type === 'brute' ? 0.6 : 0.4;
                     if (enemy.position.distanceTo(heartPos) < hitRadius) {
                         damageHeartStone(enemy.userData.type === 'brute' ? 40 : 20); 
-                        scene.remove(enemy);
-                        enemies.splice(i, 1);
+                        spawnParticleExplosion(enemy.position, 0xff0000, 15);
+                        scene.remove(enemy); enemies.splice(i, 1);
                     }
                 } else if (enemy.userData.state === 'repulsed') {
                     enemy.position.add(enemy.userData.velocity.clone().multiplyScalar(timeDelta));
                     enemy.userData.velocity.multiplyScalar(0.92); 
-                    if (enemy.userData.velocity.length() < 0.2) {
-                        enemy.userData.state = 'homing';
-                    }
+                    if (enemy.userData.velocity.length() < 0.2) enemy.userData.state = 'homing';
                 }
             }
-
-            // Process Ammo Orbs & inner symbol animations
             orbs.forEach(orb => {
                 if (orb.userData.innerSymbol) {
-                    // Constant magical tumbling for the inner symbol
                     orb.userData.innerSymbol.rotation.y += timeDelta * 2;
                     orb.userData.innerSymbol.rotation.z += timeDelta;
                 }
-
                 if (orb.userData.state === 'held') {
                     const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
                     const hand = hands[handIndex];
@@ -1162,46 +983,42 @@
                         const wristPos = hand.joints['wrist'].position;
                         const heldIndex = hand.userData.heldOrbs.indexOf(orb);
                         const totalHeld = hand.userData.heldOrbs.length;
-                        
                         const orbitRadius = 0.08;
                         const angleOffset = (heldIndex / Math.max(1, totalHeld)) * Math.PI * 2 + (timeSeconds * 4);
-                        
                         const targetPos = wristPos.clone();
                         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
                         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-                        
                         targetPos.add(right.multiplyScalar(Math.cos(angleOffset) * orbitRadius));
                         targetPos.add(up.multiplyScalar(Math.sin(angleOffset) * orbitRadius));
-
-                        orb.scale.lerp(new THREE.Vector3(0.5, 0.5, 0.5), 0.2); 
-                        orb.position.lerp(targetPos, 0.3); 
+                        orb.scale.lerp(new THREE.Vector3(0.5, 0.5, 0.5), 0.2); orb.position.lerp(targetPos, 0.3); 
                     }
-                } else {
-                    orb.position.y = orb.userData.baseY + Math.sin(timeSeconds * 2 + orb.userData.phase) * 0.05;
-                }
+                } else { orb.position.y = orb.userData.baseY + Math.sin(timeSeconds * 2 + orb.userData.phase) * 0.05; }
             });
+
+            // Update Particle Pool
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.add(p.userData.velocity);
+                p.userData.life -= 0.02;
+                p.material.opacity = p.userData.life;
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
         }
 
         function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         let lastTime = 0;
         function animate(time, frame) {
             const timeSeconds = time * 0.001;
-            const timeDelta = Math.min(timeSeconds - lastTime, 0.1); 
-            lastTime = timeSeconds;
-            
-            heartStone.rotation.y += 0.01;
-            heartStone.rotation.x += 0.005;
-
-            if (renderer.xr.isPresenting) {
-                updateHands(timeDelta, timeSeconds);
-                updateTargeting(); 
-            }
-
+            const timeDelta = Math.min(timeSeconds - lastTime, 0.1); lastTime = timeSeconds;
+            heartStone.rotation.y += 0.01; heartStone.rotation.x += 0.005;
+            if (renderer.xr.isPresenting) { updateHands(timeDelta, timeSeconds); updateTargeting(); }
             updateEntities(timeDelta, timeSeconds);
             renderer.render(scene, camera);
         }
