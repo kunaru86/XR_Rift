@@ -37,15 +37,18 @@
         let camera, scene, renderer;
         let heartStone, healthRing;
         let heartHealth = 100;
-        let orbs = [];
+        let orbs = []; // Ammunition
+        let enemies = []; // Hostiles
         const hands = [null, null]; // Left, Right
         
         // --- Settings ---
         const EMA_ALPHA = 0.4; 
         const CATCH_RADIUS = 0.15; 
         const PINCH_THRESH = 0.03;
-        const SPAWN_RATE = 2.5; // Seconds between orb spawns
-        let spawnTimer = 0;
+        const ENEMY_SPAWN_RATE = 3.0; // Seconds between enemy spawns
+        const ORB_SPAWN_RATE = 2.0;   // Seconds between ammo spawns
+        let enemySpawnTimer = 0;
+        let orbSpawnTimer = 0;
 
         const smoothedJoints = new Map();
 
@@ -261,19 +264,21 @@
                 heartHealth = 100;
                 healthRing.scale.set(1, 1, 1);
                 healthRing.material.color.setHex(0x00ff00);
-                // Wipe all orbs
+                
+                // Wipe the board
                 orbs.forEach(orb => scene.remove(orb));
                 orbs = [];
+                enemies.forEach(enemy => scene.remove(enemy));
+                enemies = [];
             }
         }
 
         function createOrb(position) {
-            const colors = [0xff0055, 0xaa00ff, 0xff5500];
-            const colorHex = colors[Math.floor(Math.random() * colors.length)];
-            
-            const geo = new THREE.SphereGeometry(0.08, 16, 16);
+            // Ammo - Harmless energy waiting to be grabbed
+            const colorHex = 0x00ffff;
+            const geo = new THREE.SphereGeometry(0.06, 16, 16);
             const mat = new THREE.MeshStandardMaterial({
-                color: colorHex, emissive: colorHex, emissiveIntensity: 0.5, roughness: 0.2, metalness: 0.8
+                color: colorHex, emissive: colorHex, emissiveIntensity: 0.8, roughness: 0.2, metalness: 0.8
             });
             const orb = new THREE.Mesh(geo, mat);
             orb.position.copy(position);
@@ -281,13 +286,30 @@
             orb.userData = { 
                 baseY: position.y, 
                 phase: Math.random() * Math.PI * 2, 
-                heldBy: null,
-                state: 'homing', // 'homing', 'held', 'repulsed'
-                velocity: new THREE.Vector3()
+                heldBy: null
             };
             
             scene.add(orb);
             orbs.push(orb);
+        }
+
+        function createEnemy(position) {
+            // Hostiles - Jagged and red, moving to destroy the artifact
+            const geo = new THREE.IcosahedronGeometry(0.12, 0);
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0xff0000, emissive: 0xaa0000, emissiveIntensity: 0.4, roughness: 0.6, flatShading: true
+            });
+            const enemy = new THREE.Mesh(geo, mat);
+            enemy.position.copy(position);
+            
+            enemy.userData = { 
+                phase: Math.random() * Math.PI * 2, 
+                state: 'homing', 
+                velocity: new THREE.Vector3()
+            };
+            
+            scene.add(enemy);
+            enemies.push(enemy);
         }
 
         function setupHand(index) {
@@ -350,24 +372,23 @@
                 mesh.quaternion.copy(camera.quaternion); 
                 scene.add(mesh);
                 
-                // Collision Logic
+                // Collision Logic against Enemies
                 const raycaster = new THREE.Raycaster(origin, forward);
-                const intersects = raycaster.intersectObjects(orbs);
+                const intersects = raycaster.intersectObjects(enemies);
                 
                 if (intersects.length > 0) {
-                    const hitOrb = intersects[0].object;
-                    const index = orbs.indexOf(hitOrb);
+                    const hitEnemy = intersects[0].object;
+                    const index = enemies.indexOf(hitEnemy);
                     if(index > -1) {
-                        // Boom. Vaporized.
-                        scene.remove(hitOrb);
-                        orbs.splice(index, 1);
+                        scene.remove(hitEnemy);
+                        enemies.splice(index, 1);
                     }
                 }
 
                 setTimeout(() => scene.remove(mesh), 200);
 
             } else if (type === 'triangle') {
-                // KINETIC REPULSE: Push all nearby non-held orbs away
+                // KINETIC REPULSE: Push all nearby enemies away
                 const REPULSE_RADIUS = 3.0; // Meters
                 const PUSH_FORCE = 3.0;
                 
@@ -384,13 +405,12 @@
                     if(mat.opacity <= 0) { clearInterval(expInt); scene.remove(mesh); }
                 }, 30);
 
-                // Collision Logic
-                orbs.forEach(orb => {
-                    if (orb.userData.state !== 'held' && orb.position.distanceTo(origin) < REPULSE_RADIUS) {
-                        orb.userData.state = 'repulsed';
-                        const pushDir = new THREE.Vector3().subVectors(orb.position, origin).normalize();
-                        // Give it severe outward velocity
-                        orb.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE)); 
+                // Collision Logic against Enemies
+                enemies.forEach(enemy => {
+                    if (enemy.position.distanceTo(origin) < REPULSE_RADIUS) {
+                        enemy.userData.state = 'repulsed';
+                        const pushDir = new THREE.Vector3().subVectors(enemy.position, origin).normalize();
+                        enemy.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE)); 
                     }
                 });
             } else if (type === 'cross' || type === 'x') {
@@ -417,16 +437,16 @@
                     mesh.quaternion.copy(directionQuat);
                     scene.add(mesh);
                     
-                    // Collision Logic
+                    // Collision Logic against Enemies
                     const raycaster = new THREE.Raycaster(origin, forward);
-                    const intersects = raycaster.intersectObjects(orbs);
+                    const intersects = raycaster.intersectObjects(enemies);
                     
                     if (intersects.length > 0) {
-                        const hitOrb = intersects[0].object;
-                        const index = orbs.indexOf(hitOrb);
+                        const hitEnemy = intersects[0].object;
+                        const index = enemies.indexOf(hitEnemy);
                         if(index > -1) {
-                            scene.remove(hitOrb);
-                            orbs.splice(index, 1);
+                            scene.remove(hitEnemy);
+                            enemies.splice(index, 1);
                         }
                     }
                     setTimeout(() => scene.remove(mesh), 300);
@@ -498,7 +518,7 @@
                     orbs.forEach(orb => {
                         if (orb.userData.heldBy === hand.userData.handedness) {
                             orb.userData.heldBy = null; 
-                            orb.userData.state = 'homing'; // Drops back to hostile state
+                            orb.userData.baseY = orb.position.y; // Drops back to idle hover
                         }
                     });
                     hand.userData.isHolding = false;
@@ -507,11 +527,10 @@
                 if (!hand.userData.isHolding && isOp) {
                     for (let i = 0; i < orbs.length; i++) {
                         const orb = orbs[i];
-                        if (orb.userData.state === 'held') continue; 
+                        if (orb.userData.heldBy !== null) continue; // Skip if held
                         
                         if (wristPos.distanceTo(orb.position) < CATCH_RADIUS) {
                             orb.userData.heldBy = hand.userData.handedness;
-                            orb.userData.state = 'held';
                             hand.userData.isHolding = true;
                             break; 
                         }
@@ -551,56 +570,71 @@
             });
         }
 
-        function updateOrbs(timeDelta, timeSeconds) {
-            // Spawn logic
-            spawnTimer -= timeDelta;
-            if (spawnTimer <= 0) {
-                spawnTimer = SPAWN_RATE;
+        function updateEntities(timeDelta, timeSeconds) {
+            // Spawn Enemy Logic
+            enemySpawnTimer -= timeDelta;
+            if (enemySpawnTimer <= 0) {
+                enemySpawnTimer = ENEMY_SPAWN_RATE;
                 const angle = Math.random() * Math.PI * 2;
-                const radius = 4; // Spawn 4 meters out
-                // Height varies slightly around Heart Stone height
+                const radius = 5; // Spawn 5 meters out
                 const yPos = 1.2 + (Math.random() * 0.8 - 0.4); 
-                createOrb(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius));
+                createEnemy(new THREE.Vector3(Math.cos(angle) * radius, yPos, -0.5 + Math.sin(angle) * radius));
+            }
+
+            // Spawn Ammo Logic (near player)
+            orbSpawnTimer -= timeDelta;
+            if (orbSpawnTimer <= 0 && orbs.length < 5) {
+                orbSpawnTimer = ORB_SPAWN_RATE;
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 0.6 + Math.random() * 0.4; // 0.6 to 1m radius around player
+                const yPos = 1.0 + Math.random() * 0.5; // Waist/Chest height
+                createOrb(new THREE.Vector3(camera.position.x + Math.cos(angle) * radius, yPos, camera.position.z + Math.sin(angle) * radius));
             }
 
             const heartPos = heartStone.position;
 
-            for (let i = orbs.length - 1; i >= 0; i--) {
-                let orb = orbs[i];
+            // Process Hostiles
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                let enemy = enemies[i];
 
-                if (orb.userData.state === 'held') {
+                if (enemy.userData.state === 'homing') {
+                    // Move relentlessly toward Heart Stone
+                    const moveDir = new THREE.Vector3().subVectors(heartPos, enemy.position).normalize();
+                    const SPEED = 0.5; 
+                    enemy.position.add(moveDir.multiplyScalar(SPEED * timeDelta));
+                    enemy.position.y += Math.sin(timeSeconds * 4 + enemy.userData.phase) * 0.003;
+                    
+                    // Rotate for jagged effect
+                    enemy.rotation.x += 0.02;
+                    enemy.rotation.y += 0.03;
+
+                    // Collision with Heart Stone
+                    if (enemy.position.distanceTo(heartPos) < 0.4) {
+                        damageHeartStone();
+                        scene.remove(enemy);
+                        enemies.splice(i, 1);
+                    }
+                } else if (enemy.userData.state === 'repulsed') {
+                    enemy.position.add(enemy.userData.velocity.clone().multiplyScalar(timeDelta));
+                    enemy.userData.velocity.multiplyScalar(0.92); 
+                    if (enemy.userData.velocity.length() < 0.2) {
+                        enemy.userData.state = 'homing';
+                    }
+                }
+            }
+
+            // Process Ammo Orbs
+            orbs.forEach(orb => {
+                if (orb.userData.heldBy) {
                     const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
                     const hand = hands[handIndex];
                     if (hand && hand.joints && hand.joints['wrist']) {
                         orb.position.lerp(hand.joints['wrist'].position, 0.2); 
                     }
-                } else if (orb.userData.state === 'homing') {
-                    // Move relentlessly toward Heart Stone
-                    const moveDir = new THREE.Vector3().subVectors(heartPos, orb.position).normalize();
-                    const SPEED = 0.4; // Meters per second
-                    orb.position.add(moveDir.multiplyScalar(SPEED * timeDelta));
-                    
-                    // Add sine wave bobbing for organic feel
-                    orb.position.y += Math.sin(timeSeconds * 3 + orb.userData.phase) * 0.002;
-
-                    // Collision with Heart Stone
-                    if (orb.position.distanceTo(heartPos) < 0.35) {
-                        damageHeartStone();
-                        scene.remove(orb);
-                        orbs.splice(i, 1);
-                    }
-                } else if (orb.userData.state === 'repulsed') {
-                    // Apply physics velocity
-                    orb.position.add(orb.userData.velocity.clone().multiplyScalar(timeDelta));
-                    // Apply air friction
-                    orb.userData.velocity.multiplyScalar(0.92); 
-                    
-                    // If slowed down enough, regain homing behavior
-                    if (orb.userData.velocity.length() < 0.2) {
-                        orb.userData.state = 'homing';
-                    }
+                } else {
+                    orb.position.y = orb.userData.baseY + Math.sin(timeSeconds * 2 + orb.userData.phase) * 0.05;
                 }
-            }
+            });
         }
 
         function onWindowResize() {
@@ -622,7 +656,7 @@
                 updateHands(timeDelta);
             }
 
-            updateOrbs(timeDelta, timeSeconds);
+            updateEntities(timeDelta, timeSeconds);
             renderer.render(scene, camera);
         }
     </script>
