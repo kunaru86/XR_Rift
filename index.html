@@ -27,7 +27,7 @@
     </script>
 </head>
 <body>
-    <div id="info">Echo Weaver: Phase 3<br/>Defend the Heart Stone. Spells: Line (Beam), Triangle (Repulse).</div>
+    <div id="info">Echo Weaver: Phase 3<br/>Defend the Heart Stone. Spells: Line (Beam), Triangle (Repulse), Cross/X (Barrage).</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -58,7 +58,7 @@
         let drawPoints3D = [];
         let activeCastingHand = null;
 
-        // --- $1 Recognizer Implementation (Compact - Circle Purged) ---
+        // --- $1 Recognizer Implementation (Compact) ---
         class Point { constructor(x, y) { this.x = x; this.y = y; } }
         class GestureRecognizer {
             constructor() {
@@ -155,11 +155,17 @@
             setupTemplates() {
                 const addT = (name, pts) => this.Templates.push({Name: name, Points: this.Normalize(pts)});
                 
-                // User rejected circle. Scrapping. 
                 // Line
                 addT('line', [new Point(0,0), new Point(100,0)]);
+                
                 // Triangle
                 addT('triangle', [new Point(50,10), new Point(10,90), new Point(90,90), new Point(50,10)]);
+
+                // Single-stroke Cross (Down, up-middle, left, right)
+                addT('cross', [new Point(50,10), new Point(50,90), new Point(50,50), new Point(10,50), new Point(90,50)]);
+                
+                // Single-stroke X (Diagonal down-right, up, diagonal down-left)
+                addT('x', [new Point(10,10), new Point(90,90), new Point(90,10), new Point(10,90)]);
             }
             Recognize(points) {
                 if(points.length < 10) return { Name: 'none', Score: 0 };
@@ -334,10 +340,10 @@
                 // BEAM WEAPON: Raycast forward from camera direction
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
                 
-                // Visual Effect
+                // Visual Effect - FIXED: rotated -Math.PI/2 to shoot away from the player
                 const geo = new THREE.CylinderGeometry(0.01, 0.01, 10);
                 geo.translate(0, 5, 0); 
-                geo.rotateX(Math.PI / 2); 
+                geo.rotateX(-Math.PI / 2); 
                 const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8});
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.copy(origin);
@@ -387,6 +393,44 @@
                         orb.userData.velocity.copy(pushDir.multiplyScalar(PUSH_FORCE)); 
                     }
                 });
+            } else if (type === 'cross' || type === 'x') {
+                // CROSS BARRAGE: Fires 4 diverging beams in an X pattern relative to the camera
+                const divergence = Math.PI / 10; // Angle of spread
+                const angles = [
+                    new THREE.Euler(divergence, divergence, 0),
+                    new THREE.Euler(divergence, -divergence, 0),
+                    new THREE.Euler(-divergence, divergence, 0),
+                    new THREE.Euler(-divergence, -divergence, 0)
+                ];
+
+                angles.forEach(euler => {
+                    const directionQuat = camera.quaternion.clone().multiply(new THREE.Quaternion().setFromEuler(euler));
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(directionQuat).normalize();
+                    
+                    // Visual Effect
+                    const geo = new THREE.CylinderGeometry(0.015, 0.015, 10);
+                    geo.translate(0, 5, 0); 
+                    geo.rotateX(-Math.PI / 2); 
+                    const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.8});
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.copy(origin);
+                    mesh.quaternion.copy(directionQuat);
+                    scene.add(mesh);
+                    
+                    // Collision Logic
+                    const raycaster = new THREE.Raycaster(origin, forward);
+                    const intersects = raycaster.intersectObjects(orbs);
+                    
+                    if (intersects.length > 0) {
+                        const hitOrb = intersects[0].object;
+                        const index = orbs.indexOf(hitOrb);
+                        if(index > -1) {
+                            scene.remove(hitOrb);
+                            orbs.splice(index, 1);
+                        }
+                    }
+                    setTimeout(() => scene.remove(mesh), 300);
+                });
             }
         }
 
@@ -401,6 +445,9 @@
             const result = recognizer.Recognize(points2D);
             console.log("Casted: ", result.Name, "Score: ", result.Score);
 
+            // Treat 'x' and 'cross' as the same weapon trigger
+            const finalSpell = (result.Name === 'x') ? 'cross' : result.Name;
+
             if (result.Name !== 'none') {
                 const heldOrbIndex = orbs.findIndex(o => o.userData.heldBy === activeCastingHand);
                 if (heldOrbIndex > -1) {
@@ -408,7 +455,7 @@
                     scene.remove(orbs[heldOrbIndex]);
                     orbs.splice(heldOrbIndex, 1);
                     
-                    fireSpell(result.Name, origin);
+                    fireSpell(finalSpell, origin);
                     
                     const handIdx = activeCastingHand === 'left' ? 0 : 1;
                     hands[handIdx].userData.isHolding = false;
