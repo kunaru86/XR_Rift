@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo Weaver - Phase 1</title>
+    <title>Echo Weaver - Phase 2</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: monospace; }
         #info {
@@ -13,9 +13,9 @@
             text-align: center;
             z-index: 100;
             pointer-events: none;
+            text-shadow: 1px 1px 2px black;
         }
     </style>
-    <!-- Import maps polyfill -->
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
     <script type="importmap">
         {
@@ -27,7 +27,7 @@
     </script>
 </head>
 <body>
-    <div id="info">Echo Weaver: Phase 1<br/>Hand Tracking Sandbox. Requires WebXR capable headset.</div>
+    <div id="info">Echo Weaver: Phase 2<br/>Catch an Orb, point your index finger, and draw a Line, Circle, or Triangle.</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -39,12 +39,150 @@
         let orbs = [];
         const hands = [null, null]; // Left, Right
         
-        // Settings based on GDD
-        const EMA_ALPHA = 0.4; // 0.0 to 1.0. Lower is smoother but laggier.
-        const CATCH_RADIUS = 0.15; // Meters
+        // --- Settings ---
+        const EMA_ALPHA = 0.4; 
+        const CATCH_RADIUS = 0.15; 
+        const DRAW_VELOCITY_THRESH = 0.005; // Minimum finger speed to start drawing
+        const DRAW_TIMEOUT = 0.5; // Seconds of stillness to finalize gesture
 
-        // Track smoothed positions to prevent jitter
         const smoothedJoints = new Map();
+
+        // --- Trail Rendering ---
+        const MAX_TRAIL_POINTS = 150;
+        let trailGeo, trailLine;
+        const trailPositions = new Float32Array(MAX_TRAIL_POINTS * 3);
+        let currentTrailCount = 0;
+        let isDrawing = false;
+        let drawPoints3D = [];
+        let drawTimer = 0;
+        let activeCastingHand = null;
+
+        // --- $1 Recognizer Implementation (Compact) ---
+        class Point { constructor(x, y) { this.x = x; this.y = y; } }
+        class GestureRecognizer {
+            constructor() {
+                this.NumPoints = 64;
+                this.SquareSize = 250.0;
+                this.HalfDiagonal = 0.5 * Math.sqrt(250.0 * 250.0 + 250.0 * 250.0);
+                this.AngleRange = this.deg2Rad(45.0);
+                this.AnglePrecision = this.deg2Rad(2.0);
+                this.Templates = [];
+                this.setupTemplates();
+            }
+            deg2Rad(d) { return (d * Math.PI / 180.0); }
+            Distance(p1, p2) { return Math.sqrt((p2.x - p1.x)*(p2.x - p1.x) + (p2.y - p1.y)*(p2.y - p1.y)); }
+            PathLength(points) { let d = 0; for(let i=1; i<points.length; i++) d += this.Distance(points[i-1], points[i]); return d; }
+            Resample(points, n) {
+                let I = this.PathLength(points) / (n - 1);
+                let D = 0.0;
+                let newpoints = [points[0]];
+                for (let i = 1; i < points.length; i++) {
+                    let d = this.Distance(points[i-1], points[i]);
+                    if ((D + d) >= I) {
+                        let qx = points[i-1].x + ((I - D) / d) * (points[i].x - points[i-1].x);
+                        let qy = points[i-1].y + ((I - D) / d) * (points[i].y - points[i-1].y);
+                        let q = new Point(qx, qy);
+                        newpoints.push(q);
+                        points.splice(i, 0, q);
+                        D = 0.0;
+                    } else D += d;
+                }
+                if (newpoints.length == n - 1) newpoints.push(points[points.length - 1]);
+                return newpoints;
+            }
+            Centroid(points) {
+                let x = 0.0, y = 0.0;
+                for (let i = 0; i < points.length; i++) { x += points[i].x; y += points[i].y; }
+                return new Point(x / points.length, y / points.length);
+            }
+            RotateBy(points, radians) {
+                let c = this.Centroid(points);
+                let cos = Math.cos(radians), sin = Math.sin(radians);
+                let newpoints = [];
+                for (let i = 0; i < points.length; i++) {
+                    let qx = (points[i].x - c.x) * cos - (points[i].y - c.y) * sin + c.x;
+                    let qy = (points[i].x - c.x) * sin + (points[i].y - c.y) * cos + c.y;
+                    newpoints.push(new Point(qx, qy));
+                }
+                return newpoints;
+            }
+            ScaleTo(points, size) {
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                for (let i = 0; i < points.length; i++) {
+                    minX = Math.min(minX, points[i].x); maxX = Math.max(maxX, points[i].x);
+                    minY = Math.min(minY, points[i].y); maxY = Math.max(maxY, points[i].y);
+                }
+                let newpoints = [];
+                for (let i = 0; i < points.length; i++) {
+                    let qx = points[i].x * (size / Math.max(maxX - minX, 1.0)); // Prevent div by 0 for strict lines
+                    let qy = points[i].y * (size / Math.max(maxY - minY, 1.0));
+                    newpoints.push(new Point(qx, qy));
+                }
+                return newpoints;
+            }
+            TranslateTo(points, pt) {
+                let c = this.Centroid(points);
+                let newpoints = [];
+                for (let i = 0; i < points.length; i++) { newpoints.push(new Point(points[i].x + pt.x - c.x, points[i].y + pt.y - c.y)); }
+                return newpoints;
+            }
+            DistanceAtBestAngle(points, T, a, b, threshold) {
+                let x1 = 0.38197 * a + 0.61803 * b;
+                let f1 = this.DistanceAtAngle(points, T, x1);
+                let x2 = 0.61803 * a + 0.38197 * b;
+                let f2 = this.DistanceAtAngle(points, T, x2);
+                while (Math.abs(b - a) > threshold) {
+                    if (f1 < f2) { b = x2; x2 = x1; f2 = f1; x1 = 0.38197 * a + 0.61803 * b; f1 = this.DistanceAtAngle(points, T, x1); } 
+                    else { a = x1; x1 = x2; f1 = f2; x2 = 0.61803 * a + 0.38197 * b; f2 = this.DistanceAtAngle(points, T, x2); }
+                }
+                return Math.min(f1, f2);
+            }
+            DistanceAtAngle(points, T, radians) {
+                let newpoints = this.RotateBy(points, radians);
+                let d = 0;
+                for (let i = 0; i < points.length; i++) d += this.Distance(newpoints[i], T.Points[i]);
+                return d / points.length;
+            }
+            Normalize(points) {
+                points = this.Resample(points, this.NumPoints);
+                let radians = Math.atan2(points[0].y - this.Centroid(points).y, points[0].x - this.Centroid(points).x);
+                points = this.RotateBy(points, -radians);
+                points = this.ScaleTo(points, this.SquareSize);
+                points = this.TranslateTo(points, new Point(0, 0));
+                return points;
+            }
+            setupTemplates() {
+                // Generative templates
+                const addT = (name, pts) => this.Templates.push({Name: name, Points: this.Normalize(pts)});
+                
+                // Line
+                addT('line', [new Point(0,0), new Point(100,0)]);
+                
+                // Circle
+                let circlePts = [];
+                for (let i = 0; i < 36; i++) {
+                    circlePts.push(new Point(50 + 50 * Math.cos(i*Math.PI/18), 50 + 50 * Math.sin(i*Math.PI/18)));
+                }
+                addT('circle', circlePts);
+                
+                // Triangle
+                addT('triangle', [new Point(50,10), new Point(10,90), new Point(90,90), new Point(50,10)]);
+            }
+            Recognize(points) {
+                if(points.length < 10) return { Name: 'none', Score: 0 };
+                points = this.Normalize(points);
+                let b = Infinity;
+                let t = -1;
+                for (let i = 0; i < this.Templates.length; i++) {
+                    let d = this.DistanceAtBestAngle(points, this.Templates[i], -this.AngleRange, this.AngleRange, this.AnglePrecision);
+                    if (d < b) { b = d; t = i; }
+                }
+                let score = 1.0 - (b / this.HalfDiagonal);
+                return (t > -1 && score > 0.60) ? { Name: this.Templates[t].Name, Score: score } : { Name: 'none', Score: score };
+            }
+        }
+        
+        const recognizer = new GestureRecognizer();
 
         init();
         renderer.setAnimationLoop(animate);
@@ -55,7 +193,7 @@
             scene.fog = new THREE.Fog(0x0a0a12, 2, 10);
 
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-            camera.position.set(0, 1.6, 3); // Average standing height
+            camera.position.set(0, 1.6, 3); 
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
@@ -78,21 +216,24 @@
             // --- Heart Stone ---
             const stoneGeo = new THREE.IcosahedronGeometry(0.3, 1);
             const stoneMat = new THREE.MeshStandardMaterial({
-                color: 0x00ffff,
-                emissive: 0x008888,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.8
+                color: 0x00ffff, emissive: 0x008888, wireframe: true, transparent: true, opacity: 0.8
             });
             heartStone = new THREE.Mesh(stoneGeo, stoneMat);
             heartStone.position.set(0, 1.2, -0.5);
             scene.add(heartStone);
 
+            // --- Trail Setup ---
+            trailGeo = new THREE.BufferGeometry();
+            trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+            trailGeo.setDrawRange(0, 0);
+            const trailMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 3, transparent: true, opacity: 0.8 });
+            trailLine = new THREE.Line(trailGeo, trailMat);
+            scene.add(trailLine);
+
             // --- Test Orbs ---
             createOrb(new THREE.Vector3(-0.5, 1.2, -0.2), 0xff0055); // Left Orb
             createOrb(new THREE.Vector3(0.5, 1.2, -0.2), 0xaa00ff);  // Right Orb
 
-            // --- WebXR Hands Setup ---
             setupHand(0); // Left
             setupHand(1); // Right
 
@@ -102,22 +243,11 @@
         function createOrb(position, colorHex) {
             const geo = new THREE.SphereGeometry(0.08, 16, 16);
             const mat = new THREE.MeshStandardMaterial({
-                color: colorHex,
-                emissive: colorHex,
-                emissiveIntensity: 0.5,
-                roughness: 0.2,
-                metalness: 0.8
+                color: colorHex, emissive: colorHex, emissiveIntensity: 0.5, roughness: 0.2, metalness: 0.8
             });
             const orb = new THREE.Mesh(geo, mat);
             orb.position.copy(position);
-            
-            // Custom properties for game logic
-            orb.userData = {
-                baseY: position.y,
-                phase: Math.random() * Math.PI * 2,
-                heldBy: null // null or 'left'/'right'
-            };
-            
+            orb.userData = { baseY: position.y, phase: Math.random() * Math.PI * 2, heldBy: null };
             scene.add(orb);
             orbs.push(orb);
         }
@@ -126,78 +256,117 @@
             const hand = renderer.xr.getHand(index);
             scene.add(hand);
 
-            // Custom joint rendering (Ghost Hands)
-            const jointGeo = new THREE.SphereGeometry(0.015, 8, 8);
             const jointMat = new THREE.MeshBasicMaterial({
-                color: 0x00ffcc,
-                transparent: true,
-                opacity: 0.4,
-                blending: THREE.AdditiveBlending
+                color: 0x00ffcc, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending
             });
-
-            // Standard WebXR joint names we care about
-            const keyJoints = [
-                'wrist', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip', 'ring-finger-tip', 'pinky-finger-tip'
-            ];
 
             hand.userData.jointMeshes = {};
             hand.userData.isHolding = false;
             hand.userData.handedness = index === 0 ? 'left' : 'right';
+            hand.userData.prevIndexPos = new THREE.Vector3();
 
-            // We will dynamically create meshes for joints as they appear in the XR tracking data
-            hand.addEventListener('connected', (event) => {
-                hand.userData.xrInputSource = event.data;
-            });
-
+            hand.addEventListener('connected', (event) => { hand.userData.xrInputSource = event.data; });
             hands[index] = hand;
         }
 
-        function applyEMA(jointName, currentPos, frameTime) {
-            // Apply Exponential Moving Average filter
+        function applyEMA(jointName, currentPos) {
             if (!smoothedJoints.has(jointName)) {
                 smoothedJoints.set(jointName, currentPos.clone());
                 return currentPos.clone();
             }
-
             const previousPos = smoothedJoints.get(jointName);
-            const smoothed = new THREE.Vector3();
-            
-            // Formula from GDD: smoothed_pos = (raw_pos * alpha) + (smoothed_pos * (1 - alpha))
-            smoothed.x = (currentPos.x * EMA_ALPHA) + (previousPos.x * (1 - EMA_ALPHA));
-            smoothed.y = (currentPos.y * EMA_ALPHA) + (previousPos.y * (1 - EMA_ALPHA));
-            smoothed.z = (currentPos.z * EMA_ALPHA) + (previousPos.z * (1 - EMA_ALPHA));
-
+            const smoothed = new THREE.Vector3(
+                (currentPos.x * EMA_ALPHA) + (previousPos.x * (1 - EMA_ALPHA)),
+                (currentPos.y * EMA_ALPHA) + (previousPos.y * (1 - EMA_ALPHA)),
+                (currentPos.z * EMA_ALPHA) + (previousPos.z * (1 - EMA_ALPHA))
+            );
             smoothedJoints.set(jointName, smoothed);
             return smoothed;
         }
 
         function isHandOpen(hand) {
-            // GDD approximation: Distance from wrist to index tip.
-            // If clenched, distance is small. If open, distance is large (~0.15m for adult).
             if (!hand.joints || !hand.joints['wrist'] || !hand.joints['index-finger-tip']) return false;
-
-            const wrist = hand.joints['wrist'];
-            const indexTip = hand.joints['index-finger-tip'];
-            
-            if (!wrist.position || !indexTip.position) return false;
-
-            const dist = wrist.position.distanceTo(indexTip.position);
-            return dist > 0.10; // 10cm threshold for "open"
+            const dist = hand.joints['wrist'].position.distanceTo(hand.joints['index-finger-tip'].position);
+            return dist > 0.10; 
         }
 
-        function updateHands() {
+        function fireSpell(type, origin) {
+            // Visual feedback for recognized spells
+            if (type === 'line') {
+                const geo = new THREE.CylinderGeometry(0.02, 0.02, 2);
+                geo.translate(0, 1, 0); // Pivot at base
+                geo.rotateX(Math.PI / 2); // Point forward
+                const mat = new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8});
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(origin);
+                mesh.quaternion.copy(camera.quaternion); // Fire where looking
+                scene.add(mesh);
+                setTimeout(() => scene.remove(mesh), 500);
+            } else if (type === 'circle') {
+                const geo = new THREE.SphereGeometry(0.5, 16, 16);
+                const mat = new THREE.MeshBasicMaterial({color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.5});
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(origin);
+                scene.add(mesh);
+                setTimeout(() => scene.remove(mesh), 2000);
+            } else if (type === 'triangle') {
+                const geo = new THREE.IcosahedronGeometry(0.1, 0);
+                const mat = new THREE.MeshBasicMaterial({color: 0xffaa00, wireframe: true});
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(origin);
+                scene.add(mesh);
+                
+                // Animate expansion
+                const expInt = setInterval(() => {
+                    mesh.scale.multiplyScalar(1.2);
+                    mat.opacity -= 0.1;
+                    if(mat.opacity <= 0) { clearInterval(expInt); scene.remove(mesh); }
+                }, 50);
+            }
+        }
+
+        function processGesture() {
+            if (drawPoints3D.length < 10) return;
+
+            // Project 3D points to 2D Screen Space
+            const points2D = drawPoints3D.map(pt3d => {
+                const vec = pt3d.clone().project(camera);
+                // Map from NDC (-1 to 1) to a pixel-like scale for the recognizer
+                return new Point((vec.x + 1) * 500, (1 - vec.y) * 500); 
+            });
+
+            const result = recognizer.Recognize(points2D);
+            console.log("Casted: ", result.Name, "Score: ", result.Score);
+
+            if (result.Name !== 'none') {
+                // Find and destroy the held orb
+                const heldOrbIndex = orbs.findIndex(o => o.userData.heldBy === activeCastingHand);
+                if (heldOrbIndex > -1) {
+                    const origin = orbs[heldOrbIndex].position.clone();
+                    scene.remove(orbs[heldOrbIndex]);
+                    orbs.splice(heldOrbIndex, 1);
+                    
+                    fireSpell(result.Name, origin);
+                    
+                    // Reset hand state
+                    const handIdx = activeCastingHand === 'left' ? 0 : 1;
+                    hands[handIdx].userData.isHolding = false;
+                }
+            }
+        }
+
+        function updateHands(timeDelta) {
             hands.forEach(hand => {
                 if (!hand || !hand.joints) return;
 
                 const wristSpace = hand.joints['wrist'];
-                if (!wristSpace || !wristSpace.position) return; // Tracking lost
+                if (!wristSpace || !wristSpace.position) return; 
 
-                // Render visual ghost joints
+                // Render ghosts and apply EMA
                 Object.keys(hand.joints).forEach(jointName => {
                     const joint = hand.joints[jointName];
                     if (!joint.position) return;
 
-                    // Create mesh if it doesn't exist
                     if (!hand.userData.jointMeshes[jointName]) {
                         const geo = new THREE.SphereGeometry(jointName.includes('tip') ? 0.012 : 0.008, 8, 8);
                         const mat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.3 });
@@ -207,62 +376,87 @@
                     }
 
                     const mesh = hand.userData.jointMeshes[jointName];
-                    
-                    // Apply EMA smoothing to visual representation
                     const uniqueJointId = `${hand.userData.handedness}_${jointName}`;
                     const smoothedPos = applyEMA(uniqueJointId, joint.position);
-                    
                     mesh.position.copy(smoothedPos);
                     mesh.quaternion.copy(joint.quaternion);
                 });
 
-                // --- Catch Logic ---
                 const isOp = isHandOpen(hand);
                 const wristPos = hand.joints['wrist'].position;
+                const indexPos = hand.joints['index-finger-tip'].position;
 
-                // Release logic: If holding but hand is closed (flick/drop)
-                if (hand.userData.isHolding && !isOp) {
+                // Grab / Drop
+                if (hand.userData.isHolding && !isOp && !isDrawing) {
                     orbs.forEach(orb => {
                         if (orb.userData.heldBy === hand.userData.handedness) {
-                            orb.userData.heldBy = null; // Drop it
-                            orb.userData.baseY = orb.position.y; // Reset hover base
+                            orb.userData.heldBy = null; 
+                            orb.userData.baseY = orb.position.y; 
                         }
                     });
                     hand.userData.isHolding = false;
                 }
 
-                // Grab logic: If empty and hand is open
                 if (!hand.userData.isHolding && isOp) {
                     for (let i = 0; i < orbs.length; i++) {
                         const orb = orbs[i];
-                        if (orb.userData.heldBy !== null) continue; // Already held by other hand
-
-                        const dist = wristPos.distanceTo(orb.position);
-                        if (dist < CATCH_RADIUS) {
-                            // Caught!
+                        if (orb.userData.heldBy !== null) continue; 
+                        if (wristPos.distanceTo(orb.position) < CATCH_RADIUS) {
                             orb.userData.heldBy = hand.userData.handedness;
                             hand.userData.isHolding = true;
-                            // Reset overload timer here eventually
                             break; 
                         }
                     }
                 }
+
+                // Spellcasting / Drawing Logic
+                if (hand.userData.isHolding) {
+                    const indexVel = indexPos.distanceTo(hand.userData.prevIndexPos);
+                    
+                    if (indexVel > DRAW_VELOCITY_THRESH) {
+                        // Start / Continue drawing
+                        if (!isDrawing) {
+                            isDrawing = true;
+                            currentTrailCount = 0;
+                            drawPoints3D = [];
+                            activeCastingHand = hand.userData.handedness;
+                        }
+                        drawTimer = 0; // Reset stillness timer
+                        
+                        if (currentTrailCount < MAX_TRAIL_POINTS && activeCastingHand === hand.userData.handedness) {
+                            drawPoints3D.push(indexPos.clone());
+                            trailPositions[currentTrailCount * 3] = indexPos.x;
+                            trailPositions[currentTrailCount * 3 + 1] = indexPos.y;
+                            trailPositions[currentTrailCount * 3 + 2] = indexPos.z;
+                            currentTrailCount++;
+                            trailGeo.setDrawRange(0, currentTrailCount);
+                            trailGeo.attributes.position.needsUpdate = true;
+                        }
+                    } else if (isDrawing && activeCastingHand === hand.userData.handedness) {
+                        // Finger is still. Count down to finalize cast.
+                        drawTimer += timeDelta;
+                        if (drawTimer > DRAW_TIMEOUT) {
+                            isDrawing = false;
+                            processGesture();
+                            trailGeo.setDrawRange(0, 0); // Clear trail visually
+                            currentTrailCount = 0;
+                        }
+                    }
+                }
+
+                hand.userData.prevIndexPos.copy(indexPos);
             });
         }
 
         function updateOrbs(time) {
             orbs.forEach(orb => {
                 if (orb.userData.heldBy) {
-                    // Update position to follow the hand holding it
                     const handIndex = orb.userData.heldBy === 'left' ? 0 : 1;
                     const hand = hands[handIndex];
                     if (hand && hand.joints && hand.joints['wrist']) {
-                        const wristPos = hand.joints['wrist'].position;
-                        // Lerp smoothly to the palm center instead of snapping instantly
-                        orb.position.lerp(wristPos, 0.2); 
+                        orb.position.lerp(hand.joints['wrist'].position, 0.2); 
                     }
                 } else {
-                    // Idle bobbing animation
                     orb.position.y = orb.userData.baseY + Math.sin(time * 2 + orb.userData.phase) * 0.05;
                 }
             });
@@ -274,18 +468,20 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        let lastTime = 0;
         function animate(time, frame) {
             const timeSeconds = time * 0.001;
+            const timeDelta = timeSeconds - lastTime;
+            lastTime = timeSeconds;
             
             heartStone.rotation.y += 0.01;
             heartStone.rotation.x += 0.005;
 
             if (renderer.xr.isPresenting) {
-                updateHands();
+                updateHands(timeDelta);
             }
 
             updateOrbs(timeSeconds);
-
             renderer.render(scene, camera);
         }
     </script>
